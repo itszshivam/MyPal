@@ -1,0 +1,38 @@
+[
+  {
+    "id": "TXN001",
+    "name": "Rahul Sharma",
+    "type": "Payment received",
+    "amount": 2500,
+    "currency": "INR",
+    "status": "Completed",
+    "date": "2026-11-06"
+  },
+  {
+    "id": "TXN002",
+    "name": "Aarav Mehta",
+    "type": "Payment sent",
+    "amount": 1200,
+    "currency": "INR",
+    "status": "Pending",
+    "date": "2026-11-05"
+  },
+  {
+    "id": "TXN003",
+    "name": "Priya Verma",
+    "type": "Refund",
+    "amount": 800,
+    "currency": "INR",
+    "status": "Completed",
+    "date": "2026-11-04"
+  },
+  {
+    "id": "TXN004",
+    "name": "Kiran Reddy",
+    "type": "Payment sent",
+    "amount": 3500,
+    "currency": "INR",
+    "status": "Failed",
+    "date": "2026-11-03"
+  }
+]
