@@ -165,6 +165,7 @@ const [transactionError, setTransactionError] = useState("");
 
   const [chatInput, setChatInput] = useState("");
   const [chatWidgetOpen, setChatWidgetOpen] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
 
   const [issue, setIssue] = useState("Failed payment");
   const [issueAmount, setIssueAmount] = useState("5000");
@@ -346,153 +347,69 @@ Thank you.`;
 
   // CONTEXT-AWARE CHATBOT
   // It checks the sample transactions before generating a reply.
-  const sendMessage = () => {
-    if (!chatInput.trim()) return;
+  
 
-    const question = chatInput.trim();
-    const q = question.toLowerCase();
+const sendMessage = async () => {
+  const question = chatInput.trim();
+
+  if (!question || chatLoading) return;
+
+  // Display the user's message
+  setMessages(prev => [
+    ...prev,
+    { from: "user", text: question }
+  ]);
+
+  setChatInput("");
+  setChatLoading(true);
+
+  try {
+    const response = await fetch(
+      "http://127.0.0.1:8000/api/assist/chat",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+          message: question,
+          transactions: transactions
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+  throw new Error(data.detail || "Assistant request failed.");
+}
+
+if (!data.reply) {
+  throw new Error("No reply received from ONE Assist.");
+}
+
+    // Display the backend response
+    setMessages(prev => [
+      ...prev,
+      { from: "ai", text: data.reply }
+    ]);
+
+  } catch (error) {
+    console.error("ONE Assist API error:", error);
 
     setMessages(prev => [
       ...prev,
-      { from: "user", text: question }
+      {
+        from: "ai",
+        text: "Sorry, I couldn't connect to ONE Assist. Please check whether the backend is running and try again."
+      }
     ]);
 
-    const matchedTransaction = transactions.find(t =>
-      q.includes(t.name.toLowerCase()) ||
-      q.includes(t.reference.toLowerCase())
-    );
-
-    let answer = "";
-
-    if (matchedTransaction) {
-      const t = matchedTransaction;
-
-      if (q.includes("refund")) {
-        answer =
-          `I found your ${t.name} transaction. ` +
-          `The amount is ${money(t.amount)} and its displayed status is ${t.status}. ` +
-          `Your payment reference is ${t.reference}. ` +
-          `To check a refund, first contact the merchant and confirm whether they initiated it. ` +
-          `Keep your transaction reference and refund confirmation. ` +
-          `I cannot check live refund progress in this demo.`;
-      } else if (t.status === "Pending") {
-        answer =
-          `I found your ${t.name} payment! ` +
-          `The amount is ${money(t.amount)} and its reference is ${t.reference}. ` +
-          `Its current displayed status is Pending. ` +
-          `This means the final payment result has not been confirmed yet. ` +
-          `Check your bank activity and the merchant order status. ` +
-          `Please avoid paying again immediately because that could create a duplicate payment.`;
-      } else if (t.status === "Failed") {
-        answer =
-          `I found your ${t.name} payment. ` +
-          `The amount is ${money(t.amount)} and its reference is ${t.reference}. ` +
-          `Its displayed status is Failed. ` +
-          `First, check whether the amount was deducted from your bank account. ` +
-          `If it was deducted, contact your official payment provider about the reversal.`;
-      } else {
-        answer =
-          `I found your ${t.name} transaction! ` +
-          `The amount is ${money(t.amount)} and its reference is ${t.reference}. ` +
-          `It is marked Completed in this demo. ` +
-          `If you have not received your order or service, check the merchant confirmation and contact the merchant.`;
-      }
-    } else if (
-      q.includes("pending") ||
-      q.includes("which payment") ||
-      q.includes("pending transaction")
-    ) {
-      const pending = transactions.filter(t => t.status === "Pending");
-
-      answer = pending.length
-        ? `I checked your sample transactions. You have ${pending.length} pending payment: ` +
-          pending.map(t =>
-            `${t.name} (${money(t.amount)}, reference ${t.reference})`
-          ).join(", ") +
-          `. A pending payment means its final result has not been confirmed. ` +
-          `Check your bank activity and merchant order status. Avoid paying again immediately.`
-        : "I couldn't find a pending payment in your sample transactions.";
-    } else if (
-      q.includes("failed") ||
-      q.includes("failure")
-    ) {
-      const failed = transactions.filter(t => t.status === "Failed");
-
-      answer = failed.length
-        ? `I found ${failed.length} failed transaction: ` +
-          failed.map(t =>
-            `${t.name} (${money(t.amount)}, reference ${t.reference})`
-          ).join(", ") +
-          `. Check whether money was deducted. If it was, contact your official payment provider about the reversal.`
-        : "I couldn't find a failed transaction in your sample data.";
-    } else if (q.includes("refund")) {
-      answer =
-        "To understand a refund, first check whether the merchant has initiated it. " +
-        "Keep your transaction reference and refund confirmation. " +
-        "The time taken depends on the payment provider and bank. " +
-        "I cannot check live refund progress in this demo.";
-    } else if (
-      q.includes("safe") ||
-      q.includes("scam") ||
-      q.includes("fraud") ||
-      q.includes("suspicious")
-    ) {
-      answer =
-        "Never share your OTP, PIN, password, or full card details. " +
-        "Be careful with urgent payment links and requests to install unknown apps. " +
-        "You can use ONE Shield to perform a basic keyword check on a suspicious message.";
-    } else if (
-      q.includes("case") ||
-      q.includes("complaint") ||
-      q.includes("support")
-    ) {
-      answer =
-        "I can help you prepare a support request. " +
-        "Open ONE Cases, choose the relevant transaction, generate a complaint, and edit it before copying. " +
-        "You can also create a demo case, which stays inside this prototype and is not sent to real support.";
-    } else if (
-      q.includes("spending") ||
-      q.includes("spent") ||
-      q.includes("money") ||
-      q.includes("total")
-    ) {
-      const totalSent = transactions
-        .filter(t => t.type === "sent")
-        .reduce((sum, t) => sum + t.amount, 0);
-
-      const totalReceived = transactions
-        .filter(t => t.type === "received")
-        .reduce((sum, t) => sum + t.amount, 0);
-
-      answer =
-        `Looking at your sample account, you've sent ${money(totalSent)} ` +
-        `and received ${money(totalReceived)} across the displayed transactions. ` +
-        `These are sample figures, not live bank balances. Visit ONE Insights for a breakdown.`;
-    } else if (q.includes("hello") || q.includes("hi")) {
-      answer =
-        "Hey there! 👋 I can help you understand your sample transactions, check pending or failed payments, learn about refunds, spot suspicious messages, and prepare support cases. Try asking me about Amazon or MP10024!";
-    } else {
-      answer =
-        "I can help with your sample transactions, pending or failed payments, refunds, suspicious messages, spending, and support cases. " +
-        "Try asking about Amazon, Netflix, Myntra, MP10024, or your spending.";
-    }
-
-    if (access.simpleLanguage) {
-      answer = answer
-        .replace(/displayed status/gi, "status shown here")
-        .replace(/transaction reference/gi, "payment reference")
-        .replace(/final payment result has not been confirmed/gi, "the payment is still being checked");
-    }
-
-    window.setTimeout(() => {
-      setMessages(prev => [
-        ...prev,
-        { from: "ai", text: answer }
-      ]);
-    }, 300);
-
-    setChatInput("");
-  };
+  } finally {
+    setChatLoading(false);
+  }
+};
 
   const checkScam = () => {
     const text = shieldText.toLowerCase();
@@ -1835,6 +1752,13 @@ Thank you.`;
                   <div className="chat-bubble">{m.text}</div>
                 </div>
               ))}
+              {chatLoading && (
+  <div className="chat-message ai">
+    <div className="chat-bubble">
+      ONE Assist is typing...
+    </div>
+  </div>
+)}
             </div>
 
             <div className="floating-chat-suggestions">
