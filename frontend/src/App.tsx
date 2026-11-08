@@ -145,6 +145,8 @@ export default function App() {
 }, []);
 
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [transactions, setTransactions] =
   useState<Transaction[]>(initialTransactions);
@@ -203,14 +205,35 @@ const [transactionError, setTransactionError] = useState("");
 
   const [guidedStep, setGuidedStep] = useState(0);
 
-  const filtered = useMemo(
-    () => transactions.filter(t =>
-      `${t.name} ${t.reference} ${t.status}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
+  
+const filtered = useMemo(
+  () =>
+    transactions.filter(t => {
+      const matchesSearch =
+        `${t.name} ${t.reference} ${t.status}`
+          .toLowerCase()
+          .includes(search.toLowerCase());
+
+      const matchesStatus =
+        statusFilter === "All" || t.status === statusFilter;
+
+      const matchesType =
+        typeFilter === "All" || t.type === typeFilter;
+
+      return matchesSearch && matchesStatus && matchesType;
+    }),
+  [transactions, search, statusFilter, typeFilter]
+);
+
+const sortedTransactions = useMemo(
+  () =>
+    [...filtered].sort(
+      (a, b) =>
+        new Date(b.date).getTime() -
+        new Date(a.date).getTime()
     ),
-    [transactions, search]
-  );
+  [filtered]
+);
 
   const caseTransaction =
     transactions.find(t => t.reference === caseTransactionRef) ||
@@ -655,6 +678,16 @@ Thank you.`;
           <div>
             <strong>{t.name}</strong>
             <span>{t.reference} · {t.date}</span>
+            
+<button
+  className="secondary-button"
+  onClick={() => {
+    navigator.clipboard.writeText(t.reference);
+  }}
+>
+  Copy reference
+</button>
+
           </div>
           <div className="explain-amount">
             <strong>{money(t.amount)}</strong>
@@ -663,6 +696,71 @@ Thank you.`;
             </span>
           </div>
         </div>
+
+        
+<div className="panel" style={{ padding: "20px", marginBottom: "20px" }}>
+  <h3>Payment Timeline</h3>
+  <p style={{ color: "#999", fontSize: "13px" }}>
+    Status journey based on the current transaction record.
+    These are not live provider events.
+  </p>
+
+  {[
+    {
+      title: "Payment Initiated",
+      detail: "Transaction recorded successfully",
+      state: "Completed"
+    },
+    {
+      title: "Payment Processing",
+      detail: t.status === "Pending"
+        ? "Awaiting final confirmation"
+        : t.status === "Failed"
+        ? "Processing was interrupted"
+        : "Processing completed",
+      state: t.status === "Pending"
+        ? "Pending"
+        : t.status === "Failed"
+        ? "Failed"
+        : "Completed"
+    },
+    {
+      title: "Final Payment Status",
+      detail: t.status === "Completed"
+        ? "Payment completed successfully"
+        : t.status === "Pending"
+        ? "Final confirmation is awaited"
+        : "Payment was unsuccessful",
+      state: t.status
+    }
+  ].map((step, index) => (
+    <div
+      key={index}
+      style={{
+        display: "flex",
+        gap: "14px",
+        padding: "12px 0",
+        borderBottom: "1px solid rgba(150,150,150,0.2)"
+      }}
+    >
+      <div>
+        {step.state === "Completed" ? "🟢" :
+         step.state === "Pending" ? "🟡" : "🔴"}
+      </div>
+
+      <div>
+        <strong>{step.title}</strong>
+        <p style={{ fontSize: "13px", color: "#999" }}>
+          {step.detail}
+        </p>
+        <span className={`status ${statusClass(step.state)}`}>
+          {step.state}
+        </span>
+      </div>
+    </div>
+  ))}
+</div>
+
 
         <div className="explain-grid">
           <div className="explain-card">
@@ -996,11 +1094,52 @@ Thank you.`;
               subtitle="Select a payment to see a clear explanation and next steps."
               icon={CreditCard}
             />
-            <div className="panel transaction-list">
-              {filtered.length
-                ? filtered.map(t => <TransactionRow key={t.id} t={t} />)
-                : <div className="empty-state">No matching transactions found.</div>}
-            </div>
+            <div style={{
+  display: "flex",
+  gap: "12px",
+  marginBottom: "16px",
+  flexWrap: "wrap"
+}}>
+  <select
+    value={statusFilter}
+    onChange={e => setStatusFilter(e.target.value)}
+  >
+    <option value="All">All statuses</option>
+    <option value="Completed">Completed</option>
+    <option value="Pending">Pending</option>
+    <option value="Failed">Failed</option>
+  </select>
+
+  <select
+    value={typeFilter}
+    onChange={e => setTypeFilter(e.target.value)}
+  >
+    <option value="All">All types</option>
+    <option value="sent">Sent</option>
+    <option value="received">Received</option>
+  </select>
+
+  <button onClick={() => {
+    setStatusFilter("All");
+    setTypeFilter("All");
+    setSearch("");
+  }}>
+    Clear filters
+  </button>
+</div>
+            
+<div className="panel transaction-list">
+  {sortedTransactions.length > 0 ? (
+    sortedTransactions.map(t => (
+      <TransactionRow key={t.id} t={t} />
+    ))
+  ) : (
+    <div className="empty-state">
+      No matching transactions found.
+    </div>
+  )}
+</div>
+
           </>}
 
           {!selected && page === "track" && <>
@@ -1027,6 +1166,47 @@ Thank you.`;
                 <p>Tap a row to open ONE Explain.</p>
               </div>
             </div>
+
+            
+  <div
+  style={{
+    display: "flex",
+    gap: "12px",
+    flexWrap: "wrap",
+    marginBottom: "16px"
+  }}
+>
+  <select
+    value={statusFilter}
+    onChange={e => setStatusFilter(e.target.value)}
+    style={{ padding: "10px", borderRadius: "8px" }}
+  >
+    <option value="All">All statuses</option>
+    <option value="Completed">Completed</option>
+    <option value="Pending">Pending</option>
+    <option value="Failed">Failed</option>
+  </select>
+
+  <select
+    value={typeFilter}
+    onChange={e => setTypeFilter(e.target.value)}
+    style={{ padding: "10px", borderRadius: "8px" }}
+  >
+    <option value="All">All types</option>
+    <option value="sent">Sent</option>
+    <option value="received">Received</option>
+  </select>
+
+  <button
+    onClick={() => {
+      setStatusFilter("All");
+      setTypeFilter("All");
+      setSearch("");
+    }}
+  >
+    Clear filters
+  </button>
+</div>
 
             <div className="panel transaction-list">
               {transactions.map(t => <TransactionRow key={t.id} t={t} />)}
