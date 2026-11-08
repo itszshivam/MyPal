@@ -2439,3 +2439,70 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================
+   DAY 5 - ONE ACCESSIBILITY
+========================= */
+
+/* LARGE TEXT MODE */
+.app.large-text {
+  font-size: 18px;
+}
+
+.app.large-text :is(
+  p, span, label, input, button, li,
+  h1, h2, h3, strong, small
+) {
+  font-size: max(1em, 1.1em);
+  line-height: 1.6;
+}
+
+/* HIGH CONTRAST MODE */
+.app.high-contrast {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-soft: #f0f0f0;
+  --border: #333333;
+  --text: #000000;
+  --muted: #333333;
+  --primary: #000080;
+  --primary-dark: #000066;
+  --primary-soft: #e5e5ff;
+  --green: #006400;
+  --green-soft: #e5f5e5;
+  --orange: #804000;
+  --orange-soft: #fff0d5;
+  --red: #a00000;
+  --red-soft: #ffe5e5;
+}
+
+.app.high-contrast .panel,
+.app.high-contrast .stat-card,
+.app.high-contrast .feature-card,
+.app.high-contrast .access-preview {
+  border: 2px solid #000000;
+}
+
+.app.high-contrast button {
+  border-color: #000000;
+}
+
+/* KEYBOARD ACCESSIBILITY */
+.app button:focus-visible,
+.app input:focus-visible,
+.app select:focus-visible,
+.app textarea:focus-visible {
+  outline: 3px solid #ff9800;
+  outline-offset: 3px;
+}
+
+/* RESPECT REDUCED MOTION */
+@media (prefers-reduced-motion: reduce) {
+  .app *,
+  .app *::before,
+  .app *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

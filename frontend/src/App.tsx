@@ -184,12 +184,39 @@ const [transactionError, setTransactionError] = useState("");
     insights: true
   });
 
-  const [access, setAccess] = useState({
+  const [access, setAccess] = useState(() => {
+  const defaults = {
     largeText: false,
     simpleLanguage: true,
     highContrast: false,
     guided: true
-  });
+  };
+
+  try {
+    const saved = localStorage.getItem("mypal-access-settings");
+
+    if (saved) {
+      const parsed = JSON.parse(saved);
+
+      return {
+        largeText: parsed.largeText ?? defaults.largeText,
+        simpleLanguage: parsed.simpleLanguage ?? defaults.simpleLanguage,
+        highContrast: parsed.highContrast ?? defaults.highContrast,
+        guided: parsed.guided ?? defaults.guided
+      };
+    }
+  } catch (error) {
+    console.error("Could not load accessibility settings:", error);
+  }
+
+  return defaults;
+});
+useEffect(() => {
+  localStorage.setItem(
+    "mypal-access-settings",
+    JSON.stringify(access)
+  );
+}, [access]);
 
   const [cases, setCases] = useState<SupportCase[]>(initialCases);
   const [caseTransactionRef, setCaseTransactionRef] = useState("MP10024");
