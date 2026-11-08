@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.database.connection import check_database
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.assist import router as assist_router
+from app.routes import resolve
 
 app = FastAPI(
     title="MyPal API",
@@ -12,6 +13,7 @@ app = FastAPI(
     version="1.0.0"
 )
 app.include_router(assist_router)
+app.include_router(resolve.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
