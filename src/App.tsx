@@ -10,6 +10,14 @@ import {
   Copy, Plus, X, Play, StopCircle
 } from "lucide-react";
 
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      [elementName: string]: any;
+    }
+  }
+}
+
 type Page =
   | "dashboard" | "transactions" | "track"
   | "resolve" | "shield" | "cases" | "insights"
@@ -252,7 +260,7 @@ Thank you.`;
       ]
     };
 
-    setCases(prev => [newCase, ...prev]);
+    setCases((prev: any) => [newCase, ...prev]);
     setCopyMessage(
       `${id} created in this demo. It was not sent to real support.`
     );
@@ -372,11 +380,11 @@ Thank you.`;
     ) {
       const totalSent = transactions
         .filter(t => t.type === "sent")
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum: any, t: { amount: any; }) => sum + t.amount, 0);
 
       const totalReceived = transactions
-        .filter(t => t.type === "received")
-        .reduce((sum, t) => sum + t.amount, 0);
+        .filter((t: { type: string; }) => t.type === "received")
+        .reduce((sum: any, t: { amount: any; }) => sum + t.amount, 0);
 
       answer =
         `Looking at your sample account, you've sent ${money(totalSent)} ` +
@@ -842,7 +850,7 @@ Thank you.`;
                   <span>Money sent</span>
                   <span className="stat-icon purple"><ArrowUpRight size={18} /></span>
                 </div>
-                <strong>{money(transactions.filter(t => t.type === "sent").reduce((a, t) => a + t.amount, 0))}</strong>
+                <strong>{money(transactions.filter(t => t.type === "sent").reduce((a: any, t: { amount: any; }) => a + t.amount, 0))}</strong>
                 <small>Sample transaction total</small>
               </div>
 
