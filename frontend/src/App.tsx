@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 type Page =
-  | "dashboard" | "transactions" | "track"
+  | "dashboard" |  "track"
   | "resolve" | "shield" | "cases" | "insights"
   | "access" | "settings";
 
@@ -40,6 +40,20 @@ type SupportCase = {
   timeline: string[];
 };
 
+type CurrencyCode = "INR" | "USD" | "EUR" | "GBP" | "AED" | "CAD" | "AUD" | "SGD" | "JPY" | "CHF";
+
+type TransferReceipt = {
+  reference: string;
+  recipient: string;
+  amountInr: number;
+  currency: CurrencyCode;
+  convertedAmount: number;
+  exchangeRate: number;
+  note: string;
+  type: "sent" | "received";
+  date: string;
+};
+
 const initialTransactions: Transaction[] = [
   { id: 1, name: "Netflix", amount: 649, type: "sent", date: "Nov 06, 2026", status: "Completed", reference: "MP10021", note: "Monthly subscription" },
   { id: 2, name: "Rahul Sharma", amount: 2500, type: "received", date: "Nov 06, 2026", status: "Completed", reference: "MP10022", note: "Money received" },
@@ -62,9 +76,26 @@ const money = (n: number) =>
     maximumFractionDigits: 0
   }).format(n);
 
+const currencySymbols: Record<CurrencyCode, string> = {
+  INR: "₹", USD: "$", EUR: "€", GBP: "£", AED: "د.إ",
+  CAD: "C$", AUD: "A$", SGD: "S$", JPY: "¥", CHF: "CHF "
+};
+
+const currencyNames: Record<CurrencyCode, string> = {
+  INR: "Indian Rupee", USD: "US Dollar", EUR: "Euro", GBP: "British Pound",
+  AED: "UAE Dirham", CAD: "Canadian Dollar", AUD: "Australian Dollar",
+  SGD: "Singapore Dollar", JPY: "Japanese Yen", CHF: "Swiss Franc"
+};
+
+const formatCurrency = (amount: number, currency: CurrencyCode) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: currency === "JPY" ? 0 : 2
+  }).format(amount);
+
 const navItems: { id: Page; label: string; icon: any; group: string }[] = [
   { id: "dashboard", label: "Overview", icon: Home, group: "MAIN" },
-  { id: "transactions", label: "Transactions", icon: CreditCard, group: "MAIN" },
   { id: "track", label: "ONE Track", icon: Activity, group: "MAIN" },
   { id: "resolve", label: "ONE Resolve", icon: LifeBuoy, group: "INTELLIGENCE" },
   { id: "shield", label: "ONE Shield", icon: ShieldCheck, group: "INTELLIGENCE" },
@@ -77,6 +108,25 @@ const navItems: { id: Page; label: string; icon: any; group: string }[] = [
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
 
+  // ONE Wallet + ONE Global are demo-only. No real money is moved.
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("mypal-demo-wallet-balance"));
+    // Start with ₹1,00,000 if this is a fresh/zero-balance demo wallet.
+    return Number.isFinite(saved) && saved > 0 ? saved : 100000;
+  });
+  const [transferOpen, setTransferOpen] = useState<null | "send" | "receive">(null);
+  const [transferRecipient, setTransferRecipient] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferCurrency, setTransferCurrency] = useState<CurrencyCode>("INR");
+  const [transferNote, setTransferNote] = useState("");
+  const [transferError, setTransferError] = useState("");
+  const [transferReceipt, setTransferReceipt] = useState<TransferReceipt | null>(null);
+  const [exchangeRates, setExchangeRates] = useState<Partial<Record<CurrencyCode, number>>>({ INR: 1 });
+  const [ratesLoading, setRatesLoading] = useState(true);
+  const [ratesUpdatedAt, setRatesUpdatedAt] = useState("");
+  const [ratesError, setRatesError] = useState("");
+  const [receiveCode, setReceiveCode] = useState("");
+
   const [dark, setDark] = useState(() => {
     return localStorage.getItem("mypal-dark") === "true";
   });
@@ -84,6 +134,42 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("mypal-dark", String(dark));
   }, [dark]);
+
+  useEffect(() => {
+    localStorage.setItem("mypal-demo-wallet-balance", String(walletBalance));
+  }, [walletBalance]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadRates = async () => {
+      setRatesLoading(true);
+      setRatesError("");
+      try {
+        const response = await fetch("https://open.er-api.com/v6/latest/INR", {
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error("Exchange-rate service unavailable");
+        const data = await response.json();
+        if (data.result !== "success" || !data.rates) throw new Error("Invalid exchange-rate response");
+        const supported: CurrencyCode[] = ["INR", "USD", "EUR", "GBP", "AED", "CAD", "AUD", "SGD", "JPY", "CHF"];
+        const nextRates: Partial<Record<CurrencyCode, number>> = { INR: 1 };
+        supported.forEach(code => {
+          const rate = Number(data.rates[code]);
+          if (Number.isFinite(rate) && rate > 0) nextRates[code] = rate;
+        });
+        setExchangeRates(nextRates);
+        setRatesUpdatedAt(data.time_last_update_utc || new Date().toLocaleString());
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setRatesError("Live exchange rates could not be loaded. INR transfers still work; foreign-currency estimates are unavailable.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setRatesLoading(false);
+      }
+    };
+    loadRates();
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
   const fetchTransactions = async () => {
     try {
@@ -127,7 +213,10 @@ export default function App() {
         })
       );
 
-      setTransactions(formattedTransactions);
+      setTransactions(prev => [
+        ...prev.filter(t => t.note.includes("DEMO")),
+        ...formattedTransactions
+      ]);
 
     } catch (error) {
       console.error("Transaction API error:", error);
@@ -370,6 +459,88 @@ Thank you.`;
     setCopyMessage(
       `${id} created in this demo. It was not sent to real support.`
     );
+  };
+
+  const parsedTransferAmount = Number(transferAmount);
+  const selectedRate = exchangeRates[transferCurrency] || 0;
+  const convertedTransferAmount =
+    transferCurrency === "INR" ? parsedTransferAmount :
+    selectedRate > 0 ? parsedTransferAmount / selectedRate : 0;
+
+  const openTransfer = (mode: "send" | "receive") => {
+    setTransferOpen(mode);
+    setTransferRecipient("");
+    setTransferAmount("");
+    setTransferCurrency("INR");
+    setTransferNote("");
+    setTransferError("");
+    setTransferReceipt(null);
+    setReceiveCode("");
+  };
+
+  const completeDemoTransfer = () => {
+    const amount = Number(transferAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTransferError("Enter an amount greater than zero.");
+      return;
+    }
+    if (transferOpen === "send" && !transferRecipient.trim()) {
+      setTransferError("Enter the recipient's name or payment handle.");
+      return;
+    }
+    if (transferOpen === "send" && amount > walletBalance) {
+      setTransferError("Your demo wallet does not have enough balance for this transfer.");
+      return;
+    }
+    if (transferCurrency !== "INR" && (!selectedRate || ratesLoading)) {
+      setTransferError("Wait for a valid exchange rate before using a foreign currency.");
+      return;
+    }
+
+    const amountInr = transferCurrency === "INR" ? amount : amount / selectedRate;
+    const reference = `MP${Date.now().toString().slice(-8)}`;
+    const receipt: TransferReceipt = {
+      reference,
+      recipient: transferOpen === "send" ? transferRecipient.trim() : "You",
+      amountInr,
+      currency: transferCurrency,
+      convertedAmount: amount,
+      exchangeRate: selectedRate || 1,
+      note: transferNote.trim() || (transferOpen === "send" ? "Demo money transfer" : "Demo money received"),
+      type: transferOpen === "send" ? "sent" : "received",
+      date: new Date().toLocaleString("en-IN")
+    };
+
+    if (transferOpen === "send") {
+      setWalletBalance(prev => Math.max(0, prev - amountInr));
+    } else {
+      setWalletBalance(prev => prev + amountInr);
+    }
+
+    const newTransaction: Transaction = {
+      id: reference,
+      name: receipt.recipient,
+      amount: amountInr,
+      type: receipt.type,
+      date: new Date().toLocaleDateString("en-IN"),
+      status: "Completed",
+      reference,
+      note: `${receipt.note}${transferCurrency !== "INR" ? ` · ${formatCurrency(amount, transferCurrency)} at ${selectedRate.toFixed(6)} ${transferCurrency}/INR` : ""} · DEMO`
+    };
+    setTransactions(prev => [newTransaction, ...prev]);
+    setTransferReceipt(receipt);
+    setTransferOpen(null);
+  };
+
+  const createReceiveRequest = () => {
+    const amount = Number(transferAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTransferError("Enter an amount greater than zero.");
+      return;
+    }
+    const code = `ONE-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    setReceiveCode(code);
+    setTransferError("");
   };
 
   // CONTEXT-AWARE CHATBOT
@@ -898,7 +1069,22 @@ if (!data.reply) {
                 <h2>Good to see you again.</h2>
                 <p>Here's what's happening with your transactions.</p>
               </div>
-              <div className="date-chip"><Activity size={15} /> Demo account</div>
+              <div className="dashboard-actions">
+                <div className="date-chip"><Activity size={15} /> Demo account</div>
+                <div className="button-row">
+                  <button className="primary-button" onClick={() => openTransfer("send")}><Send size={16} /> Send money</button>
+                  <button className="secondary-button" onClick={() => openTransfer("receive")}><ArrowDownLeft size={16} /> Receive money</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="wallet-balance-card">
+              <div>
+                <span className="eyebrow">ONE WALLET · DEMO BALANCE</span>
+                <h2>{money(walletBalance)}</h2>
+                <p>Available demo balance · Transfers update this prototype only</p>
+              </div>
+              <div className="wallet-balance-icon"><Wallet size={27} /></div>
             </div>
 
             <div className="hero-banner">
@@ -975,7 +1161,7 @@ if (!data.reply) {
                 <h3>Recent transactions</h3>
                 <p>Select any transaction to understand it.</p>
               </div>
-              <button className="text-button" onClick={() => setPage("transactions")}>
+              <button className="text-button" onClick={() => setPage("track")}>
                 View all <ArrowRight size={15} />
               </button>
             </div>
@@ -1032,59 +1218,7 @@ if (!data.reply) {
             </div>
           </>}
 
-          {!selected && page === "transactions" && <>
-            <PageIntro
-              title="All transactions"
-              subtitle="Select a payment to see a clear explanation and next steps."
-              icon={CreditCard}
-            />
-            <div style={{
-  display: "flex",
-  gap: "12px",
-  marginBottom: "16px",
-  flexWrap: "wrap"
-}}>
-  <select
-    value={statusFilter}
-    onChange={e => setStatusFilter(e.target.value)}
-  >
-    <option value="All">All statuses</option>
-    <option value="Completed">Completed</option>
-    <option value="Pending">Pending</option>
-    <option value="Failed">Failed</option>
-  </select>
-
-  <select
-    value={typeFilter}
-    onChange={e => setTypeFilter(e.target.value)}
-  >
-    <option value="All">All types</option>
-    <option value="sent">Sent</option>
-    <option value="received">Received</option>
-  </select>
-
-  <button onClick={() => {
-    setStatusFilter("All");
-    setTypeFilter("All");
-    setSearch("");
-  }}>
-    Clear filters
-  </button>
-</div>
-            
-<div className="panel transaction-list">
-  {sortedTransactions.length > 0 ? (
-    sortedTransactions.map(t => (
-      <TransactionRow key={t.id} t={t} />
-    ))
-  ) : (
-    <div className="empty-state">
-      No matching transactions found.
-    </div>
-  )}
-</div>
-
-          </>}
+      
 
           {!selected && page === "track" && <>
             <PageIntro
@@ -1163,6 +1297,33 @@ if (!data.reply) {
               subtitle="A step-by-step guide to preparing for a payment issue."
               icon={LifeBuoy}
             />
+
+            <div className="smart-guidance-grid">
+              <div className="panel smart-guidance-card">
+                <span className="eyebrow"><Sparkles size={13} /> ONE SMART JOURNEY</span>
+                <h3>Your next best steps, in one place.</h3>
+                <p>ONE Resolve brings the guided journey together: verify the payment, check your bank entry, collect evidence, then contact verified support.</p>
+                <ol>
+                  <li>Understand the transaction status</li>
+                  <li>Confirm whether money was debited</li>
+                  <li>Keep the reference and supporting evidence</li>
+                  <li>Use the official provider's support channel</li>
+                </ol>
+              </div>
+              <div className="panel smart-guidance-card">
+                <span className="eyebrow"><Bell size={13} /> ONE SMART ALERTS</span>
+                <h3>Important things to notice.</h3>
+                <p>These alerts are generated from the demo transaction records, not from a live bank connection.</p>
+                {transactions.filter(t => t.status !== "Completed").slice(0, 3).map(t => (
+                  <button className="smart-alert-row" key={t.reference} onClick={() => setSelected(t)}>
+                    <AlertTriangle size={16} />
+                    <span><strong>{t.name}</strong><small>{t.status} · {t.reference}</small></span>
+                    <ChevronRight size={15} />
+                  </button>
+                ))}
+                {transactions.every(t => t.status === "Completed") && <p>No pending or failed demo transactions right now.</p>}
+              </div>
+            </div>
 
             <div className="resolve-layout">
               <div className="panel resolve-panel">
@@ -1742,6 +1903,93 @@ if (!data.reply) {
 
       {/* FLOATING CHAT WIDGET — AVAILABLE ON EVERY PAGE */}
       <div className="floating-chat">
+        {transferOpen && (
+          <div className="modal-backdrop" onClick={() => setTransferOpen(null)}>
+            <div className="transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title" onClick={e => e.stopPropagation()}>
+              <div className="modal-heading">
+                <div>
+                  <span className="eyebrow">ONE WALLET</span>
+                  <h2 id="transfer-title">{transferOpen === "send" ? "Send money" : "Receive money"}</h2>
+                  <p>{transferOpen === "send" ? "Create a simulated transfer with a live currency estimate." : "Create a demo request code or record a simulated incoming payment."}</p>
+                </div>
+                <button className="icon-button" onClick={() => setTransferOpen(null)} aria-label="Close"><X size={19} /></button>
+              </div>
+
+              {transferOpen === "send" && (
+                <label className="field-label">Recipient name / payment handle
+                  <input value={transferRecipient} onChange={e => setTransferRecipient(e.target.value)} placeholder="e.g. Alex or alex@example" />
+                </label>
+              )}
+              <label className="field-label">Amount
+                <input type="number" min="0" step="0.01" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} placeholder="Enter amount" />
+              </label>
+              <label className="field-label">Currency
+                <select value={transferCurrency} onChange={e => setTransferCurrency(e.target.value as CurrencyCode)}>
+                  {(Object.keys(currencyNames) as CurrencyCode[]).map(code => <option key={code} value={code}>{code} — {currencyNames[code]}</option>)}
+                </select>
+              </label>
+
+              <div className="conversion-preview">
+                {transferCurrency === "INR" ? (
+                  <><span>Wallet amount</span><strong>{Number.isFinite(parsedTransferAmount) && parsedTransferAmount > 0 ? money(parsedTransferAmount) : "₹0"}</strong></>
+                ) : (
+                  <>
+                    <span>Estimated INR equivalent</span>
+                    <strong>{convertedTransferAmount > 0 ? money(convertedTransferAmount) : "—"}</strong>
+                    <small>{ratesLoading ? "Loading exchange rate…" : selectedRate ? `1 INR = ${selectedRate.toFixed(6)} ${transferCurrency} · 1 ${transferCurrency} = ${(1 / selectedRate).toFixed(6)} INR` : "Exchange rate unavailable"}</small>
+                  </>
+                )}
+                {ratesUpdatedAt && <small>Rates last updated: {ratesUpdatedAt}</small>}
+                {ratesError && <small className="rate-warning">{ratesError}</small>}
+              </div>
+
+              <label className="field-label">Note (optional)
+                <input value={transferNote} onChange={e => setTransferNote(e.target.value)} placeholder="What's this payment for?" />
+              </label>
+              {transferOpen === "send" && <p className="wallet-available">Available demo balance: <strong>{money(walletBalance)}</strong></p>}
+              {transferError && <p className="form-error" role="alert">{transferError}</p>}
+
+              {transferOpen === "receive" && (
+                <div className="receive-request-area">
+                  <button className="secondary-button" onClick={createReceiveRequest}>Generate receive request code</button>
+                  {receiveCode && <div className="request-code"><span>Share this demo request code</span><strong>{receiveCode}</strong><button className="text-button" onClick={() => navigator.clipboard?.writeText(receiveCode)}>Copy code</button></div>}
+                  <p className="demo-disclaimer">A request code is a demo reference only. It does not create a real payment link.</p>
+                </div>
+              )}
+
+              <div className="button-row modal-actions">
+                <button className="secondary-button" onClick={() => setTransferOpen(null)}>Cancel</button>
+                <button className="primary-button" onClick={completeDemoTransfer}>{transferOpen === "send" ? "Confirm demo transfer" : "Record demo receipt"} <ArrowRight size={16} /></button>
+              </div>
+              <p className="demo-disclaimer">Demo mode: this prototype does not connect to a bank, payment network, or real recipient. No real money is transferred.</p>
+            </div>
+          </div>
+        )}
+
+        {transferReceipt && (
+          <div className="modal-backdrop" onClick={() => setTransferReceipt(null)}>
+            <div className="transfer-modal receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title" onClick={e => e.stopPropagation()}>
+              <div className="receipt-success"><CheckCircle2 size={34} /><span>DEMO TRANSACTION RECORDED</span></div>
+              <h2 id="receipt-title">{transferReceipt.type === "sent" ? "Transfer summary" : "Receive summary"}</h2>
+              <div className="receipt-amount">{formatCurrency(transferReceipt.convertedAmount, transferReceipt.currency)}</div>
+              <p>{transferReceipt.type === "sent" ? "To" : "Received from"}: <strong>{transferReceipt.recipient}</strong></p>
+              <div className="receipt-details">
+                <div><span>Wallet impact (INR)</span><strong>{transferReceipt.type === "sent" ? "−" : "+"}{money(transferReceipt.amountInr)}</strong></div>
+                {transferReceipt.currency !== "INR" && <div><span>Exchange rate</span><strong>1 INR = {transferReceipt.exchangeRate.toFixed(6)} {transferReceipt.currency}</strong></div>}
+                <div><span>Reference</span><strong>{transferReceipt.reference}</strong></div>
+                <div><span>Date</span><strong>{transferReceipt.date}</strong></div>
+                <div><span>Note</span><strong>{transferReceipt.note}</strong></div>
+                <div><span>Updated demo balance</span><strong>{money(walletBalance)}</strong></div>
+              </div>
+              <div className="button-row">
+                <button className="secondary-button" onClick={() => navigator.clipboard?.writeText(`MyPal ONE demo receipt\nReference: ${transferReceipt.reference}\n${transferReceipt.type === "sent" ? "To" : "From"}: ${transferReceipt.recipient}\nAmount: ${formatCurrency(transferReceipt.convertedAmount, transferReceipt.currency)}\nWallet INR: ${money(transferReceipt.amountInr)}\nDemo only — no real payment.`)}><Copy size={16} /> Copy receipt</button>
+                <button className="primary-button" onClick={() => setTransferReceipt(null)}>Done</button>
+              </div>
+              <p className="demo-disclaimer">This is a locally recorded demo receipt, not proof of a real-world payment.</p>
+            </div>
+          </div>
+        )}
+
         {chatWidgetOpen && (
           <div className="floating-chat-window">
             <div className="floating-chat-header">
@@ -1882,7 +2130,14 @@ if (!data.reply) {
         .notification-pop strong{font-size:13px}
         .notification-pop p{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted)}
 
-        .content{max-width:1280px;margin:0 auto;padding:30px 35px 55px}
+        .content{
+  width:100%;
+  max-width:none;
+  margin:0;
+  padding:30px 35px 55px;
+  min-width:0;
+  overflow-x:clip;
+}
         .welcome-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
         .eyebrow{font-size:9px;font-weight:800;letter-spacing:1.5px;color:var(--primary)}
         .welcome-row h2{font:800 25px Manrope;margin:7px 0 4px}
@@ -2412,6 +2667,62 @@ if (!data.reply) {
             font-size:8px;
             padding:6px 8px;
           }
+        }
+        .dashboard-actions{display:flex;flex-direction:column;align-items:flex-end;gap:12px}
+        .wallet-balance-card{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 28px;margin:18px 0 22px;border-radius:18px;background:linear-gradient(120deg,#172b55,#3158a5);color:#fff;box-shadow:0 12px 30px rgba(35,65,130,.16)}
+        .wallet-balance-card h2{font-size:32px;margin:8px 0 4px}
+        .wallet-balance-card p{margin:0;color:rgba(255,255,255,.76);font-size:13px}
+        .wallet-balance-card .eyebrow{color:#c9d8ff}
+        .wallet-balance-icon{width:58px;height:58px;border-radius:17px;background:rgba(255,255,255,.14);display:grid;place-items:center}
+        .smart-guidance-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:18px 0}
+        .smart-guidance-card{padding:20px}
+        .smart-guidance-card h3{margin:10px 0 8px}
+        .smart-guidance-card p,.smart-guidance-card li{font-size:13px;line-height:1.6;color:var(--muted)}
+        .smart-guidance-card ol{padding-left:20px;margin-bottom:0}
+        .smart-guidance-card .eyebrow{display:flex;align-items:center;gap:6px}
+        .smart-alert-row{width:100%;display:flex;align-items:center;gap:10px;padding:10px 0;border:0;border-top:1px solid var(--border);background:transparent;color:var(--text);text-align:left;cursor:pointer}
+        .smart-alert-row span{display:flex;flex:1;flex-direction:column;gap:3px}
+        .smart-alert-row small{color:var(--muted)}
+        .modal-backdrop{position:fixed;inset:0;background:rgba(10,18,35,.62);z-index:100;display:flex;align-items:center;justify-content:center;padding:18px;overflow:auto}
+        .transfer-modal{width:min(100%,540px);max-height:min(92vh,900px);overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:24px;box-shadow:0 25px 80px rgba(0,0,0,.25)}
+        .modal-heading{display:flex;justify-content:space-between;gap:15px;margin-bottom:20px}
+        .modal-heading h2{margin:6px 0}
+        .modal-heading p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+        .transfer-modal .field-label{display:flex;flex-direction:column;gap:8px;margin:14px 0;font-weight:600;font-size:13px}
+        .transfer-modal .field-label input,.transfer-modal .field-label select{width:100%;padding:12px 13px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font:inherit}
+        .transfer-modal .field-label select{color-scheme:light;appearance:auto}
+        .app.dark-mode .transfer-modal .field-label select{background-color:#292d42;color:#f2f3fb;color-scheme:dark;border-color:#4a4f68}
+        .app.dark-mode .transfer-modal .field-label select option{background-color:#202337;color:#f2f3fb}
+        .app:not(.dark-mode) .transfer-modal .field-label select option{background-color:#fff;color:#20243a}
+        .conversion-preview{display:flex;flex-direction:column;gap:5px;padding:15px;border:1px solid var(--border);border-radius:12px;background:var(--background);margin:14px 0}
+        .conversion-preview span,.conversion-preview small{font-size:12px;color:var(--muted)}
+        .conversion-preview strong{font-size:23px}
+        .rate-warning,.form-error{color:#d94b4b!important}
+        .wallet-available{font-size:13px;color:var(--muted)}
+        .form-error{font-size:13px;margin:8px 0}
+        .receive-request-area{padding:12px 0}
+        .request-code{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px;margin-top:10px;border:1px dashed var(--primary);border-radius:12px}
+        .request-code span{font-size:12px;color:var(--muted)}
+        .request-code strong{font-size:18px;letter-spacing:1px}
+        .request-code .text-button{margin-left:auto}
+        .modal-actions{justify-content:flex-end;margin-top:14px}
+        .receipt-modal h2{text-align:center;margin:12px 0}
+        .receipt-success{display:flex;flex-direction:column;align-items:center;gap:7px;color:#15966a;font-size:11px;font-weight:800;letter-spacing:1px}
+        .receipt-amount{text-align:center;font-size:30px;font-weight:800;margin:12px 0}
+        .receipt-modal>p{text-align:center;font-size:13px}
+        .receipt-details{display:flex;flex-direction:column;gap:0;margin:18px 0;border-top:1px solid var(--border)}
+        .receipt-details>div{display:flex;justify-content:space-between;gap:15px;padding:11px 0;border-bottom:1px solid var(--border);font-size:12px}
+        .receipt-details span{color:var(--muted)}
+        .receipt-details strong{text-align:right;max-width:60%;overflow-wrap:anywhere}
+        .receipt-modal .button-row{justify-content:center}
+        .transfer-modal .demo-disclaimer{font-size:11px;line-height:1.5;color:var(--muted);margin:14px 0 0}
+        @media(max-width:700px){
+          .dashboard-actions{align-items:flex-start}
+          .wallet-balance-card{padding:19px}
+          .wallet-balance-card h2{font-size:27px}
+          .smart-guidance-grid{grid-template-columns:1fr}
+          .transfer-modal{padding:19px}
+          .receipt-details>div{align-items:flex-start}
         }
       `}</style>
     </div>
