@@ -1,8 +1,8 @@
 <!-- Please replace anything appearing between curly brackets with your submission's value.  -->
 
-# { MyPal ONE }
+# MyPal ONE 
 
-{ MyPal ONE is an intelligent payment companion that simplifies digital payments through smart tracking, guided issue resolution, fraud awareness, and personalized financial insights — all in one place. 🚀. }
+ MyPal ONE is an intelligent payment companion that simplifies digital payments through smart tracking, guided issue resolution, fraud awareness, and personalized financial insights — all in one place. 🚀. 
 
 ## Details
 
@@ -39,9 +39,25 @@ A unified fintech web application featuring multiple connected modules:
 
 **Our Vision:** Make every digital payment easier to understand, safer to manage and simpler to resolve.
 
-## Screenshots
+## Application Screenshots
 
-{ Include at least one screenshot or video. }
+### Dashboard
+![MyPal ONE Dashboard](screenshots/overview.png)
+
+### ONE Track
+![ONE Track](screenshots/onetrack.png)
+
+### ONE Resolve
+![ONE Resolve](screenshots/oneresolve.png)
+
+### ONE Shield
+![ONE Shield](screenshots/oneshield.png)
+
+### ONE Insights
+![ONE Insights](screenshots/oneinsights.png)
+
+### ONE Cases
+
 
 ## Collaborators
 
