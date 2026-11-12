@@ -1,0 +1,13 @@
+[
+  {
+    "order_id": "7KV231574L942160P",
+    "capture_id": "8TD19280HV0450021",
+    "status": "COMPLETED",
+    "amount": "5.00",
+    "currency_code": "USD",
+    "payer_email": "sb-i1acw53880830@personal.example.com",
+    "payer_name": "John Doe",
+    "created_at": "2026-11-12T12:58:01Z",
+    "source": "PayPal Sandbox"
+  }
+]

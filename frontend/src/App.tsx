@@ -9,9 +9,10 @@ import {
   Headphones, Menu, Eye, ArrowRight, CircleHelp, Volume2,
   Copy, Plus, X, Play, StopCircle
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 
 type Page =
-  | "dashboard" |  "track"
+  | "dashboard" | "track"
   | "resolve" | "shield" | "cases" | "insights"
   | "access" | "settings";
 
@@ -21,11 +22,13 @@ type Transaction = {
   id: string | number;
   name: string;
   amount: number;
+  currency?: string;
   type: "sent" | "received";
   date: string;
   status: Status;
   reference: string;
   note: string;
+  source?: string;
 };
 
 type ChatMessage = { from: "ai" | "user"; text: string };
@@ -75,6 +78,16 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 0
   }).format(n);
+
+const transactionMoney = (
+  amount: number,
+  currency = "INR"
+) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2
+  }).format(amount);
 
 const currencySymbols: Record<CurrencyCode, string> = {
   INR: "₹", USD: "$", EUR: "€", GBP: "£", AED: "د.إ",
@@ -171,77 +184,137 @@ export default function App() {
     return () => controller.abort();
   }, []);
   useEffect(() => {
-  const fetchTransactions = async () => {
-    try {
-      setLoadingTransactions(true);
-      setTransactionError("");
+    const fetchTransactions = async () => {
+      try {
+        setLoadingTransactions(true);
+        setTransactionError("");
 
-      const response = await fetch(
-        "http://127.0.0.1:8000/api/transactions"
-      );
+        const response = await fetch(
+          "http://127.0.0.1:8000/api/transactions"
+        );
 
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        const records = Array.isArray(data)
+          ? data
+          : data.transactions;
+
+        if (!Array.isArray(records)) {
+          throw new Error("Invalid transaction response");
+        }
+
+        const formattedTransactions: Transaction[] = records.map(
+          (item: any, index: number) => ({
+            id: String(item.id ?? index + 1),
+            name: item.name ?? "Unknown",
+            amount: Number(item.amount),
+            type:
+              String(item.type).toLowerCase().includes("received") ||
+                String(item.type).toLowerCase().includes("refund")
+                ? "received"
+                : "sent",
+            date: item.date ?? "",
+            status: ["Completed", "Pending", "Failed"].includes(item.status)
+              ? item.status
+              : "Pending",
+            reference: String(item.id ?? item.reference ?? index + 1),
+            note: item.description ?? item.type ?? ""
+          })
+        );
+
+        setTransactions(prev => [
+          ...prev.filter(t => t.note.includes("DEMO")),
+          ...formattedTransactions
+        ]);
+
+      } catch (error) {
+        console.error("Transaction API error:", error);
+
+        setTransactionError(
+          "Could not load transactions. Showing demo data instead."
+        );
+
+      } finally {
+        setLoadingTransactions(false);
       }
+    };
 
-      const data = await response.json();
-
-      const records = Array.isArray(data)
-        ? data
-        : data.transactions;
-
-      if (!Array.isArray(records)) {
-        throw new Error("Invalid transaction response");
-      }
-
-      const formattedTransactions: Transaction[] = records.map(
-        (item: any, index: number) => ({
-          id: String(item.id ?? index + 1),
-          name: item.name ?? "Unknown",
-          amount: Number(item.amount),
-          type:
-            String(item.type).toLowerCase().includes("received") ||
-            String(item.type).toLowerCase().includes("refund")
-              ? "received"
-              : "sent",
-          date: item.date ?? "",
-          status: ["Completed", "Pending", "Failed"].includes(item.status)
-            ? item.status
-            : "Pending",
-          reference: String(item.id ?? item.reference ?? index + 1),
-          note: item.description ?? item.type ?? ""
-        })
-      );
-
-      setTransactions(prev => [
-        ...prev.filter(t => t.note.includes("DEMO")),
-        ...formattedTransactions
-      ]);
-
-    } catch (error) {
-      console.error("Transaction API error:", error);
-
-      setTransactionError(
-        "Could not load transactions. Showing demo data instead."
-      );
-
-    } finally {
-      setLoadingTransactions(false);
-    }
-  };
-
-  fetchTransactions();
-}, []);
+    fetchTransactions();
+  }, []);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [typeFilter, setTypeFilter] = useState("All");
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [transactions, setTransactions] =
-  useState<Transaction[]>(initialTransactions);
+    useState<Transaction[]>(initialTransactions);
 
-const [loadingTransactions, setLoadingTransactions] = useState(true);
-const [transactionError, setTransactionError] = useState("");
+  const [loadingTransactions, setLoadingTransactions] = useState(true);
+  const [transactionError, setTransactionError] = useState("");
+
+  useEffect(() => {
+    const fetchPayPalTransactions = async () => {
+      try {
+        const response = await fetch(
+          "http://127.0.0.1:8000/api/paypal/transactions"
+        );
+
+        if (!response.ok) {
+          throw new Error(`PayPal API returned ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!Array.isArray(data.transactions)) {
+          throw new Error("Invalid PayPal transaction response");
+        }
+
+        const paypalTransactions: Transaction[] =
+          data.transactions.map((item: any) => ({
+            id: item.capture_id,
+            name:
+              item.payer_name ||
+              item.payer_email ||
+              "PayPal Sandbox Buyer",
+            amount: Number(item.amount),
+            currency: item.currency_code || "USD",
+            type: "received",
+            date: item.created_at
+              ? new Date(item.created_at).toLocaleDateString("en-IN")
+              : "",
+            status:
+              item.status === "COMPLETED"
+                ? "Completed"
+                : item.status === "FAILED"
+                  ? "Failed"
+                  : "Pending",
+            reference: item.capture_id || item.order_id,
+            note: `PayPal Sandbox · Order ${item.order_id}`,
+            source: "PayPal Sandbox"
+          }));
+
+        setTransactions(prev => [
+          ...paypalTransactions,
+          ...prev.filter(t => t.source !== "PayPal Sandbox")
+        ]);
+
+        console.log(
+          "PayPal transactions loaded:",
+          paypalTransactions.length
+        );
+
+      } catch (error) {
+        console.error("PayPal transaction loading error:", error);
+      }
+    };
+
+    fetchPayPalTransactions();
+  }, []);
+
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
 
@@ -274,38 +347,38 @@ const [transactionError, setTransactionError] = useState("");
   });
 
   const [access, setAccess] = useState(() => {
-  const defaults = {
-    largeText: false,
-    simpleLanguage: true,
-    highContrast: false,
-    guided: true
-  };
+    const defaults = {
+      largeText: false,
+      simpleLanguage: true,
+      highContrast: false,
+      guided: true
+    };
 
-  try {
-    const saved = localStorage.getItem("mypal-access-settings");
+    try {
+      const saved = localStorage.getItem("mypal-access-settings");
 
-    if (saved) {
-      const parsed = JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
 
-      return {
-        largeText: parsed.largeText ?? defaults.largeText,
-        simpleLanguage: parsed.simpleLanguage ?? defaults.simpleLanguage,
-        highContrast: parsed.highContrast ?? defaults.highContrast,
-        guided: parsed.guided ?? defaults.guided
-      };
+        return {
+          largeText: parsed.largeText ?? defaults.largeText,
+          simpleLanguage: parsed.simpleLanguage ?? defaults.simpleLanguage,
+          highContrast: parsed.highContrast ?? defaults.highContrast,
+          guided: parsed.guided ?? defaults.guided
+        };
+      }
+    } catch (error) {
+      console.error("Could not load accessibility settings:", error);
     }
-  } catch (error) {
-    console.error("Could not load accessibility settings:", error);
-  }
 
-  return defaults;
-});
-useEffect(() => {
-  localStorage.setItem(
-    "mypal-access-settings",
-    JSON.stringify(access)
-  );
-}, [access]);
+    return defaults;
+  });
+  useEffect(() => {
+    localStorage.setItem(
+      "mypal-access-settings",
+      JSON.stringify(access)
+    );
+  }, [access]);
 
   const [cases, setCases] = useState<SupportCase[]>(initialCases);
   const [caseTransactionRef, setCaseTransactionRef] = useState("MP10024");
@@ -322,35 +395,35 @@ useEffect(() => {
 
   const [guidedStep, setGuidedStep] = useState(0);
 
-  
-const filtered = useMemo(
-  () =>
-    transactions.filter(t => {
-      const matchesSearch =
-        `${t.name} ${t.reference} ${t.status}`
-          .toLowerCase()
-          .includes(search.toLowerCase());
 
-      const matchesStatus =
-        statusFilter === "All" || t.status === statusFilter;
+  const filtered = useMemo(
+    () =>
+      transactions.filter(t => {
+        const matchesSearch =
+          `${t.name} ${t.reference} ${t.status}`
+            .toLowerCase()
+            .includes(search.toLowerCase());
 
-      const matchesType =
-        typeFilter === "All" || t.type === typeFilter;
+        const matchesStatus =
+          statusFilter === "All" || t.status === statusFilter;
 
-      return matchesSearch && matchesStatus && matchesType;
-    }),
-  [transactions, search, statusFilter, typeFilter]
-);
+        const matchesType =
+          typeFilter === "All" || t.type === typeFilter;
 
-const sortedTransactions = useMemo(
-  () =>
-    [...filtered].sort(
-      (a, b) =>
-        new Date(b.date).getTime() -
-        new Date(a.date).getTime()
-    ),
-  [filtered]
-);
+        return matchesSearch && matchesStatus && matchesType;
+      }),
+    [transactions, search, statusFilter, typeFilter]
+  );
+
+  const sortedTransactions = useMemo(
+    () =>
+      [...filtered].sort(
+        (a, b) =>
+          new Date(b.date).getTime() -
+          new Date(a.date).getTime()
+      ),
+    [filtered]
+  );
 
   const caseTransaction =
     transactions.find(t => t.reference === caseTransactionRef) ||
@@ -381,8 +454,8 @@ const sortedTransactions = useMemo(
         transaction.status === "Pending"
           ? "Payment is pending"
           : transaction.status === "Failed"
-          ? "Payment failed"
-          : "Unexpected transaction"
+            ? "Payment failed"
+            : "Unexpected transaction"
       );
     }
 
@@ -392,32 +465,93 @@ const sortedTransactions = useMemo(
     setSelected(null);
   };
 
+
   const generateComplaint = () => {
     const t = caseTransaction;
 
-    const text = `Subject: Assistance required for ${caseIssue}
+    if (!t) {
+      setCopyMessage("Please select a transaction first.");
+      return;
+    }
+
+    const text = `Subject: Assistance Required for ${caseIssue}
 
 Hello Support Team,
 
-I need assistance with a transaction in my account.
+I need assistance regarding a transaction in my account.
 
-Transaction details:
-Merchant / Recipient: ${t.name}
-Amount: ${money(t.amount)}
-Transaction date: ${t.date}
-Transaction reference: ${t.reference}
-Current displayed status: ${t.status}
+TRANSACTION DETAILS
 
-Issue:
+Merchant / Recipient: ${t.name || "Not available"}
+Transaction Amount: ${transactionMoney(t.amount, t.currency)}
+Transaction Date: ${t.date || "Not available"}
+Transaction Reference: ${t.reference || "Not available"}
+Payment Source: ${t.source || "Not available"}
+Current Transaction Status: ${t.status || "Unknown"}
+
+ISSUE DESCRIPTION
+
 ${caseIssue}
 
-I request you to review this transaction, confirm its current status, and guide me on the next steps. Please let me know if any additional information or evidence is required.
+REQUESTED RESOLUTION
 
-Thank you.`;
+I kindly request your team to investigate this transaction, verify its current status, and provide guidance regarding the appropriate resolution.
+
+Please let me know if any additional information or supporting evidence is required.
+
+Thank you for your assistance.
+
+Regards,
+MyPal User`;
 
     setComplaint(text);
-    setCopyMessage("Complaint generated. You can edit it before copying.");
+    setCopyMessage(
+      "Professional complaint generated successfully. You can edit it before copying."
+    );
   };
+
+
+  const downloadComplaintPDF = () => {
+    if (!complaint) {
+      setCopyMessage("Please generate a complaint first.");
+      return;
+    }
+
+    const doc = new jsPDF();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("MyPal - ONE Resolve", 20, 20);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Payment Support Complaint", 20, 28);
+
+    doc.setDrawColor(100);
+    doc.line(20, 33, 190, 33);
+
+    doc.setFontSize(11);
+
+    const lines = doc.splitTextToSize(complaint, 170);
+
+    let y = 43;
+
+    lines.forEach((line) => {
+      if (y > 275) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.text(line, 20, y);
+      y += 7;
+    });
+
+    doc.save("MyPal_Complaint.pdf");
+
+    setCopyMessage("Complaint PDF downloaded successfully!");
+  };
+
+
 
   const copyComplaint = async () => {
     if (!complaint.trim()) return;
@@ -465,7 +599,7 @@ Thank you.`;
   const selectedRate = exchangeRates[transferCurrency] || 0;
   const convertedTransferAmount =
     transferCurrency === "INR" ? parsedTransferAmount :
-    selectedRate > 0 ? parsedTransferAmount / selectedRate : 0;
+      selectedRate > 0 ? parsedTransferAmount / selectedRate : 0;
 
   const openTransfer = (mode: "send" | "receive") => {
     setTransferOpen(mode);
@@ -545,69 +679,69 @@ Thank you.`;
 
   // CONTEXT-AWARE CHATBOT
   // It checks the sample transactions before generating a reply.
-  
 
-const sendMessage = async () => {
-  const question = chatInput.trim();
 
-  if (!question || chatLoading) return;
+  const sendMessage = async () => {
+    const question = chatInput.trim();
 
-  // Display the user's message
-  setMessages(prev => [
-    ...prev,
-    { from: "user", text: question }
-  ]);
+    if (!question || chatLoading) return;
 
-  setChatInput("");
-  setChatLoading(true);
-
-  try {
-    const response = await fetch(
-      "http://127.0.0.1:8000/api/assist/chat",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-
-        body: JSON.stringify({
-          message: question,
-          transactions: transactions
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-  throw new Error(data.detail || "Assistant request failed.");
-}
-
-if (!data.reply) {
-  throw new Error("No reply received from ONE Assist.");
-}
-
-    // Display the backend response
+    // Display the user's message
     setMessages(prev => [
       ...prev,
-      { from: "ai", text: data.reply }
+      { from: "user", text: question }
     ]);
 
-  } catch (error) {
-    console.error("ONE Assist API error:", error);
+    setChatInput("");
+    setChatLoading(true);
 
-    setMessages(prev => [
-      ...prev,
-      {
-        from: "ai",
-        text: "Sorry, I couldn't connect to ONE Assist. Please check whether the backend is running and try again."
+    try {
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/assist/chat",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+
+          body: JSON.stringify({
+            message: question,
+            transactions: transactions
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Assistant request failed.");
       }
-    ]);
 
-  } finally {
-    setChatLoading(false);
-  }
-};
+      if (!data.reply) {
+        throw new Error("No reply received from ONE Assist.");
+      }
+
+      // Display the backend response
+      setMessages(prev => [
+        ...prev,
+        { from: "ai", text: data.reply }
+      ]);
+
+    } catch (error) {
+      console.error("ONE Assist API error:", error);
+
+      setMessages(prev => [
+        ...prev,
+        {
+          from: "ai",
+          text: "Sorry, I couldn't connect to ONE Assist. Please check whether the backend is running and try again."
+        }
+      ]);
+
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   const checkScam = () => {
     const text = shieldText.toLowerCase();
@@ -633,8 +767,8 @@ if (!data.reply) {
         found.length >= 2
           ? "High caution"
           : found.length === 1
-          ? "Review carefully"
-          : "No obvious keywords found",
+            ? "Review carefully"
+            : "No obvious keywords found",
       reasons: found.length
         ? found.map(f => `Contains a caution keyword: "${f}"`)
         : ["No listed warning keywords were detected."],
@@ -657,10 +791,10 @@ if (!data.reply) {
     status === "Completed" || status === "Resolved"
       ? "success"
       : status === "Pending" || status === "Under review"
-      ? "pending"
-      : status === "Failed" || status === "Action required"
-      ? "danger"
-      : "neutral";
+        ? "pending"
+        : status === "Failed" || status === "Action required"
+          ? "danger"
+          : "neutral";
 
   const TransactionRow = ({ t }: { t: Transaction }) => (
     <button className="transaction-row" onClick={() => setSelected(t)}>
@@ -677,7 +811,8 @@ if (!data.reply) {
 
       <div className="transaction-amount">
         <strong className={t.type === "received" ? "green-text" : ""}>
-          {t.type === "received" ? "+" : "-"}{money(t.amount)}
+          {t.type === "received" ? "+" : "-"}
+          {transactionMoney(t.amount, t.currency)}
         </strong>
         <span className={`status ${statusClass(t.status)}`}>
           {t.status}
@@ -734,41 +869,41 @@ if (!data.reply) {
 
   const TransactionExplain = ({ t }: { t: Transaction }) => {
     const explanation =
-      t.status === "Completed"
+    t.status === "Completed"
+      ? {
+        what: "The transaction is marked as completed in this demo.",
+        why: "The payment record shows a successful status. This does not independently confirm that the merchant has fulfilled an order.",
+        money: "The payment is recorded as completed. Check your bank or wallet statement for the final account entry.",
+        next: [
+          "Check the merchant order or recipient confirmation.",
+          "Save the transaction reference.",
+          "Contact the merchant if the order or service is missing."
+        ],
+        avoid: "Do not pay again before checking the merchant and your bank statement."
+      }
+      : t.status === "Pending"
         ? {
-            what: "The transaction is marked as completed in this demo.",
-            why: "The payment record shows a successful status. This does not independently confirm that the merchant has fulfilled an order.",
-            money: "The payment is recorded as completed. Check your bank or wallet statement for the final account entry.",
-            next: [
-              "Check the merchant order or recipient confirmation.",
-              "Save the transaction reference.",
-              "Contact the merchant if the order or service is missing."
-            ],
-            avoid: "Do not pay again before checking the merchant and your bank statement."
-          }
-        : t.status === "Pending"
-        ? {
-            what: "The payment has started, but its final result is not confirmed yet.",
-            why: "The bank, payment provider, or merchant may still be processing the transaction. This demo cannot identify the exact cause.",
-            money: "The amount may be temporarily held or debited depending on the payment method. Check your bank statement for the actual account status.",
-            next: [
-              "Check your bank activity.",
-              "Check the merchant order status.",
-              "Keep the reference number and wait for the provider's stated processing time."
-            ],
-            avoid: "Avoid making the same payment again immediately. It could create a duplicate payment."
-          }
+          what: "The payment has started, but its final result is not confirmed yet.",
+          why: "The bank, payment provider, or merchant may still be processing the transaction. This demo cannot identify the exact cause.",
+          money: "The amount may be temporarily held or debited depending on the payment method. Check your bank statement for the actual account status.",
+          next: [
+            "Check your bank activity.",
+            "Check the merchant order status.",
+            "Keep the reference number and wait for the provider's stated processing time."
+          ],
+          avoid: "Avoid making the same payment again immediately. It could create a duplicate payment."
+        }
         : {
-            what: "The transaction is marked as failed in this demo.",
-            why: "Possible reasons include a bank decline, insufficient balance, connection issue, or verification problem. The actual reason needs provider confirmation.",
-            money: "If money was deducted, check your bank statement and ask the payment provider about the reversal or refund timeline.",
-            next: [
-              "Check whether money was deducted.",
-              "Save the transaction reference.",
-              "Contact the official provider if the amount was debited or the issue continues."
-            ],
-            avoid: "Do not retry repeatedly without checking whether the first payment was deducted."
-          };
+          what: "The transaction is marked as failed in this demo.",
+          why: "Possible reasons include a bank decline, insufficient balance, connection issue, or verification problem. The actual reason needs provider confirmation.",
+          money: "If money was deducted, check your bank statement and ask the payment provider about the reversal or refund timeline.",
+          next: [
+            "Check whether money was deducted.",
+            "Save the transaction reference.",
+            "Contact the official provider if the amount was debited or the issue continues."
+          ],
+          avoid: "Do not retry repeatedly without checking whether the first payment was deducted."
+        };
 
     const spoken =
       `${t.name}. ${t.status}. What happened: ${explanation.what}. ` +
@@ -793,88 +928,99 @@ if (!data.reply) {
           <div>
             <strong>{t.name}</strong>
             <span>{t.reference} · {t.date}</span>
-            
-<button
-  className="secondary-button"
-  onClick={() => {
-    navigator.clipboard.writeText(t.reference);
-  }}
->
-  Copy reference
-</button>
+            <span>
+              Payment source: {t.source || "MyPal"}
+            </span>
+            <span>
+              {t.note}
+            </span>
+
+            <button
+              className="secondary-button"
+              onClick={() => {
+                navigator.clipboard.writeText(t.reference);
+              }}
+            >
+              Copy reference
+            </button>
 
           </div>
           <div className="explain-amount">
-            <strong>{money(t.amount)}</strong>
+            <strong>
+              {formatCurrency(
+                t.amount,
+                (t.currency || "INR") as CurrencyCode
+              )}
+            </strong>
             <span className={`status ${statusClass(t.status)}`}>
               {t.status}
             </span>
           </div>
         </div>
 
-        
-<div className="panel" style={{ padding: "20px", marginBottom: "20px" }}>
-  <h3>Payment Timeline</h3>
-  <p style={{ color: "#999", fontSize: "13px" }}>
-    Status journey based on the current transaction record.
-    These are not live provider events.
-  </p>
 
-  {[
-    {
-      title: "Payment Initiated",
-      detail: "Transaction recorded successfully",
-      state: "Completed"
-    },
-    {
-      title: "Payment Processing",
-      detail: t.status === "Pending"
-        ? "Awaiting final confirmation"
-        : t.status === "Failed"
-        ? "Processing was interrupted"
-        : "Processing completed",
-      state: t.status === "Pending"
-        ? "Pending"
-        : t.status === "Failed"
-        ? "Failed"
-        : "Completed"
-    },
-    {
-      title: "Final Payment Status",
-      detail: t.status === "Completed"
-        ? "Payment completed successfully"
-        : t.status === "Pending"
-        ? "Final confirmation is awaited"
-        : "Payment was unsuccessful",
-      state: t.status
-    }
-  ].map((step, index) => (
-    <div
-      key={index}
-      style={{
-        display: "flex",
-        gap: "14px",
-        padding: "12px 0",
-        borderBottom: "1px solid rgba(150,150,150,0.2)"
-      }}
-    >
-      <div>
-        {step.state === "Completed" ? "🟢" :
-         step.state === "Pending" ? "🟡" : "🔴"}
-      </div>
+        <div className="panel" style={{ padding: "20px", marginBottom: "20px" }}>
+          <h3>Payment Timeline</h3>
+          <p style={{ color: "#999", fontSize: "13px" }}>
+            Status journey based on the current transaction record.
+            These are not live provider events.
+          </p>
 
-      <div>
-        <strong>{step.title}</strong>
-        <p style={{ fontSize: "13px", color: "#999" }}>
-          {step.detail}
-        </p>
-        <span className={`status ${statusClass(step.state)}`}>
-          {step.state}
-        </span>
-      </div>
-    </div>
-  ))}
-</div>
+          {[
+            {
+              title: "Payment Initiated",
+              detail: "Transaction recorded successfully",
+              state: "Completed"
+            },
+            {
+              title: "Payment Processing",
+              detail: t.status === "Pending"
+                ? "Awaiting final confirmation"
+                : t.status === "Failed"
+                  ? "Processing was interrupted"
+                  : "Processing completed",
+              state: t.status === "Pending"
+                ? "Pending"
+                : t.status === "Failed"
+                  ? "Failed"
+                  : "Completed"
+            },
+            {
+              title: "Final Payment Status",
+              detail: t.status === "Completed"
+                ? "Payment completed successfully"
+                : t.status === "Pending"
+                  ? "Final confirmation is awaited"
+                  : "Payment was unsuccessful",
+              state: t.status
+            }
+          ].map((step, index) => (
+            <div
+              key={index}
+              style={{
+                display: "flex",
+                gap: "14px",
+                padding: "12px 0",
+                borderBottom: "1px solid rgba(150,150,150,0.2)"
+              }}
+            >
+              <div>
+                {step.state === "Completed" ? "🟢" :
+                  step.state === "Pending" ? "🟡" : "🔴"}
+              </div>
+
+              <div>
+                <strong>{step.title}</strong>
+                <p style={{ fontSize: "13px", color: "#999" }}>
+                  {step.detail}
+                </p>
+                <span className={`status ${statusClass(step.state)}`}>
+                  {step.state}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
 
 
         <div className="explain-grid">
@@ -916,1168 +1062,1170 @@ if (!data.reply) {
             <p>{explanation.avoid}</p>
           </div>
         </div>
-
-        <div className="button-row">
-          <button className="secondary-button" onClick={() => speak(spoken)}>
-            <Volume2 size={17} /> Read aloud
-          </button>
-          <button className="secondary-button" onClick={stopSpeaking}>
-            <StopCircle size={17} /> Stop
-          </button>
-          <button
-            className="primary-button"
-            onClick={() => openCaseBuilder(t)}
-          >
-            <FileText size={17} /> Build a support case
-            <ArrowRight size={16} />
-          </button>
         </div>
-      </div>
-    );
+      );
   };
 
-  return (
-    <div className={`app ${dark ? "dark-mode" : ""} ${access.largeText ? "large-text" : ""} ${access.highContrast ? "high-contrast" : ""}`}>
+        return (
+        <div className={`app ${dark ? "dark-mode" : ""} ${access.largeText ? "large-text" : ""} ${access.highContrast ? "high-contrast" : ""}`}>
 
-      <aside className={`sidebar ${mobileMenu ? "mobile-open" : ""}`}>
-        <div className="brand">
-          <div className="brand-mark"><Zap size={22} fill="white" /></div>
-          <div>
-            <strong>MyPal <span>ONE</span></strong>
-            <small>PAYMENT COMPANION</small>
-          </div>
-          <button
-            className="mobile-close icon-button"
-            onClick={() => setMobileMenu(false)}
-          >
-            <X size={19} />
-          </button>
-        </div>
-
-        <div className="profile-mini">
-          <div className="avatar">M</div>
-          <div>
-            <strong>My Account</strong>
-            <span>Personal workspace</span>
-          </div>
-          <span className="online-dot" />
-        </div>
-
-        {["MAIN", "INTELLIGENCE", "TOOLS"].map(group => (
-          <div className="nav-group" key={group}>
-            <span className="nav-label">{group}</span>
-
-            {navItems.filter(item => item.group === group).map(item => {
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={item.id}
-                  className={`nav-item ${page === item.id ? "active" : ""}`}
-                  onClick={() => {
-                    setPage(item.id);
-                    setSelected(null);
-                    setMobileMenu(false);
-                  }}
-                >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
-                  {item.id === "cases" &&
-                    <span className="nav-count">{cases.length}</span>}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-
-        <div className="sidebar-bottom">
-          <div className="help-card">
-            <div className="help-icon"><Headphones size={19} /></div>
-            <strong>Need a hand?</strong>
-            <p>ONE Assist is here whenever you need help.</p>
-            <button onClick={() => setChatWidgetOpen(true)}>
-              Chat with ONE Assist <ArrowRight size={14} />
-            </button>
-          </div>
-          <div className="sidebar-footer">
-            <ShieldCheck size={15} /> Your clarity comes first.
-          </div>
-        </div>
-      </aside>
-
-      <main className="main">
-        <header className="topbar">
-          <div className="topbar-left">
-            <button
-              className="mobile-menu icon-button"
-              onClick={() => setMobileMenu(true)}
-            >
-              <Menu size={20} />
-            </button>
-
-            <div>
-              <div className="breadcrumb">MyPal ONE / {pageTitle}</div>
-              <h1>{pageTitle}</h1>
-            </div>
-          </div>
-
-          <div className="topbar-actions">
-            <label className="search-box">
-              <Search size={17} />
-              <input
-                placeholder="Search transactions..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </label>
-
-            <button
-              className="icon-button"
-              onClick={() => setDark(!dark)}
-              title="Toggle theme"
-            >
-              {dark ? <Sun size={19} /> : <Moon size={19} />}
-            </button>
-
-            <div className="notification-wrap">
+          <aside className={`sidebar ${mobileMenu ? "mobile-open" : ""}`}>
+            <div className="brand">
+              <div className="brand-mark"><Zap size={22} fill="white" /></div>
+              <div>
+                <strong>MyPal <span>ONE</span></strong>
+                <small>PAYMENT COMPANION</small>
+              </div>
               <button
-                className="icon-button notification-button"
-                onClick={() => setAlertsOpen(!alertsOpen)}
+                className="mobile-close icon-button"
+                onClick={() => setMobileMenu(false)}
               >
-                <Bell size={19} />
-                {settings.alerts && <i />}
-              </button>
-
-              {alertsOpen && (
-                <div className="notification-pop">
-                  <strong>Notifications</strong>
-                  <p><Clock3 size={15} /> Amazon payment is pending.</p>
-                  <p><ShieldAlert size={15} /> Review your failed Myntra payment.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
-
-        <div className="content">
-          {selected && <TransactionExplain t={selected} />}
-
-          {!selected && page === "dashboard" && <>
-            <div className="welcome-row">
-              <div>
-                <span className="eyebrow">YOUR MONEY, MADE CLEARER</span>
-                <h2>Good to see you again.</h2>
-                <p>Here's what's happening with your transactions.</p>
-              </div>
-              <div className="dashboard-actions">
-                <div className="date-chip"><Activity size={15} /> Demo account</div>
-                <div className="button-row">
-                  <button className="primary-button" onClick={() => openTransfer("send")}><Send size={16} /> Send money</button>
-                  <button className="secondary-button" onClick={() => openTransfer("receive")}><ArrowDownLeft size={16} /> Receive money</button>
-                </div>
-              </div>
-            </div>
-
-            <div className="wallet-balance-card">
-              <div>
-                <span className="eyebrow">ONE WALLET · DEMO BALANCE</span>
-                <h2>{money(walletBalance)}</h2>
-                <p>Available demo balance · Transfers update this prototype only</p>
-              </div>
-              <div className="wallet-balance-icon"><Wallet size={27} /></div>
-            </div>
-
-            <div className="hero-banner">
-              <div className="hero-copy">
-                <span className="hero-tag">
-                  <Sparkles size={13} /> INTRODUCING MY PAL ONE
-                </span>
-                <h2>
-                  Payments are complicated.<br />
-                  <em>Understanding them shouldn't be.</em>
-                </h2>
-                <p>
-                  Understand transactions, prepare support requests,
-                  and make payments more accessible.
-                </p>
-                <button onClick={() => setPage("track")}>
-                  Explore ONE Track <ArrowRight size={16} />
-                </button>
-              </div>
-
-              <div className="hero-art">
-                <div className="orbit orbit-one" />
-                <div className="orbit orbit-two" />
-                <div className="hero-symbol"><Zap size={48} fill="white" /></div>
-                <div className="floating-chip chip-a">
-                  <CheckCircle2 size={15} /> Clear status
-                </div>
-                <div className="floating-chip chip-b">
-                  <ShieldCheck size={15} /> Safer choices
-                </div>
-              </div>
-            </div>
-
-            <div className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-top">
-                  <span>Total transactions</span>
-                  <span className="stat-icon blue"><CreditCard size={18} /></span>
-                </div>
-                <strong>{transactions.length}</strong>
-                <small>In this sample account</small>
-              </div>
-
-              <div className="stat-card">
-                <div className="stat-top">
-                  <span>Money sent</span>
-                  <span className="stat-icon purple"><ArrowUpRight size={18} /></span>
-                </div>
-                <strong>{money(transactions.filter(t => t.type === "sent").reduce((a, t) => a + t.amount, 0))}</strong>
-                <small>Sample transaction total</small>
-              </div>
-
-              <div className="stat-card">
-                <div className="stat-top">
-                  <span>Money received</span>
-                  <span className="stat-icon green"><ArrowDownLeft size={18} /></span>
-                </div>
-                <strong>{money(transactions.filter(t => t.type === "received").reduce((a, t) => a + t.amount, 0))}</strong>
-                <small>Sample transaction total</small>
-              </div>
-
-              <div className="stat-card">
-                <div className="stat-top">
-                  <span>Needs attention</span>
-                  <span className="stat-icon orange"><AlertTriangle size={18} /></span>
-                </div>
-                <strong>{transactions.filter(t => t.status !== "Completed").length}</strong>
-                <small>Pending or failed</small>
-              </div>
-            </div>
-
-            <div className="section-heading">
-              <div>
-                <h3>Recent transactions</h3>
-                <p>Select any transaction to understand it.</p>
-              </div>
-              <button className="text-button" onClick={() => setPage("track")}>
-                View all <ArrowRight size={15} />
+                <X size={19} />
               </button>
             </div>
 
-            <div className="panel transaction-list">
-
-  {loadingTransactions && (
-    <p>Loading transactions...</p>
-  )}
-
-  {transactionError && (
-    <p role="alert">{transactionError}</p>
-  )}
-
-  {!loadingTransactions && transactions.length === 0 && (
-    <p>No transactions available.</p>
-  )}
-
-  {transactions.slice(0, 4).map(t => (
-    <TransactionRow key={t.id} t={t} />
-  ))}
-
-</div>
-            <div className="feature-grid">
-              <button
-                className="feature-card"
-                onClick={() => setChatWidgetOpen(true)}
-              >
-                <div className="feature-icon lavender"><MessageCircle /></div>
-                <strong>ONE Assist</strong>
-                <p>Ask questions in simple language.</p>
-                <ArrowRight size={17} />
-              </button>
-
-              <button
-                className="feature-card"
-                onClick={() => setPage("cases")}
-              >
-                <div className="feature-icon peach"><FileText /></div>
-                <strong>ONE Case Builder</strong>
-                <p>Prepare a support-ready complaint.</p>
-                <ArrowRight size={17} />
-              </button>
-
-              <button
-                className="feature-card"
-                onClick={() => setPage("access")}
-              >
-                <div className="feature-icon mint"><Accessibility /></div>
-                <strong>ONE Access+</strong>
-                <p>Make payment guidance easier to use.</p>
-                <ArrowRight size={17} />
-              </button>
-            </div>
-          </>}
-
-      
-
-          {!selected && page === "track" && <>
-            <PageIntro
-              title="ONE Track"
-              subtitle="Follow what happened to a payment and understand what to do next."
-              icon={Activity}
-            />
-            <div className="track-banner">
+            <div className="profile-mini">
+              <div className="avatar">M</div>
               <div>
-                <span className="eyebrow">TRANSACTION CLARITY</span>
-                <h2>Every payment has a story.</h2>
-                <p>
-                  Choose a transaction below to see its status, possible
-                  explanation, and recommended next steps.
-                </p>
+                <strong>My Account</strong>
+                <span>Personal workspace</span>
               </div>
-              <div className="track-graphic"><Activity size={48} /></div>
+              <span className="online-dot" />
             </div>
 
-            <div className="section-heading">
-              <div>
-                <h3>Choose a transaction</h3>
-                <p>Tap a row to open ONE Explain.</p>
-              </div>
-            </div>
+            {["MAIN", "INTELLIGENCE", "TOOLS"].map(group => (
+              <div className="nav-group" key={group}>
+                <span className="nav-label">{group}</span>
 
-            
-  <div
-  style={{
-    display: "flex",
-    gap: "12px",
-    flexWrap: "wrap",
-    marginBottom: "16px"
-  }}
->
-  <select
-    value={statusFilter}
-    onChange={e => setStatusFilter(e.target.value)}
-    style={{ padding: "10px", borderRadius: "8px" }}
-  >
-    <option value="All">All statuses</option>
-    <option value="Completed">Completed</option>
-    <option value="Pending">Pending</option>
-    <option value="Failed">Failed</option>
-  </select>
+                {navItems.filter(item => item.group === group).map(item => {
+                  const Icon = item.icon;
 
-  <select
-    value={typeFilter}
-    onChange={e => setTypeFilter(e.target.value)}
-    style={{ padding: "10px", borderRadius: "8px" }}
-  >
-    <option value="All">All types</option>
-    <option value="sent">Sent</option>
-    <option value="received">Received</option>
-  </select>
-
-  <button
-    onClick={() => {
-      setStatusFilter("All");
-      setTypeFilter("All");
-      setSearch("");
-    }}
-  >
-    Clear filters
-  </button>
-</div>
-
-            <div className="panel transaction-list">
-              {transactions.map(t => <TransactionRow key={t.id} t={t} />)}
-            </div>
-          </>}
-
-          {!selected && page === "resolve" && <>
-            <PageIntro
-              title="ONE Resolve"
-              subtitle="A step-by-step guide to preparing for a payment issue."
-              icon={LifeBuoy}
-            />
-
-            <div className="smart-guidance-grid">
-              <div className="panel smart-guidance-card">
-                <span className="eyebrow"><Sparkles size={13} /> ONE SMART JOURNEY</span>
-                <h3>Your next best steps, in one place.</h3>
-                <p>ONE Resolve brings the guided journey together: verify the payment, check your bank entry, collect evidence, then contact verified support.</p>
-                <ol>
-                  <li>Understand the transaction status</li>
-                  <li>Confirm whether money was debited</li>
-                  <li>Keep the reference and supporting evidence</li>
-                  <li>Use the official provider's support channel</li>
-                </ol>
-              </div>
-              <div className="panel smart-guidance-card">
-                <span className="eyebrow"><Bell size={13} /> ONE SMART ALERTS</span>
-                <h3>Important things to notice.</h3>
-                <p>These alerts are generated from the demo transaction records, not from a live bank connection.</p>
-                {transactions.filter(t => t.status !== "Completed").slice(0, 3).map(t => (
-                  <button className="smart-alert-row" key={t.reference} onClick={() => setSelected(t)}>
-                    <AlertTriangle size={16} />
-                    <span><strong>{t.name}</strong><small>{t.status} · {t.reference}</small></span>
-                    <ChevronRight size={15} />
-                  </button>
-                ))}
-                {transactions.every(t => t.status === "Completed") && <p>No pending or failed demo transactions right now.</p>}
-              </div>
-            </div>
-
-            <div className="resolve-layout">
-              <div className="panel resolve-panel">
-                <span className="eyebrow">GUIDED RESOLUTION</span>
-                <h2>Let's understand the issue.</h2>
-
-                <label className="field-label">What issue are you facing?</label>
-                <select
-                  value={issue}
-                  onChange={e => {
-                    setIssue(e.target.value);
-                    setResolveStep(0);
-                  }}
-                >
-                  <option>Failed payment</option>
-                  <option>Payment pending</option>
-                  <option>Refund not received</option>
-                  <option>Money deducted twice</option>
-                  <option>Unknown transaction</option>
-                </select>
-
-                <label className="field-label">Amount involved (₹)</label>
-                <input
-                  value={issueAmount}
-                  onChange={e => setIssueAmount(e.target.value)}
-                  type="number"
-                />
-
-                <div className="resolve-progress">
-                  <span>Step {resolveStep + 1} of {resolveAdvice.length}</span>
-                  <div>
-                    <i style={{
-                      width: `${((resolveStep + 1) / resolveAdvice.length) * 100}%`
-                    }} />
-                  </div>
-                </div>
-
-                <div className="resolve-step">
-                  <span className="step-number">0{resolveStep + 1}</span>
-                  <div>
-                    <h3>{[
-                      "Check the transaction",
-                      "Verify the bank entry",
-                      "Collect your evidence",
-                      "Contact official support"
-                    ][resolveStep]}</h3>
-                    <p>{resolveAdvice[resolveStep]}</p>
-                  </div>
-                </div>
-
-                <div className="button-row">
-                  <button
-                    className="secondary-button"
-                    disabled={resolveStep === 0}
-                    onClick={() => setResolveStep(s => s - 1)}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    className="primary-button"
-                    onClick={() =>
-                      resolveStep === 3
-                        ? openCaseBuilder()
-                        : setResolveStep(s => s + 1)
-                    }
-                  >
-                    {resolveStep === 3 ? "Build support case" : "Next step"}
-                    <ArrowRight size={16} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="side-info-card">
-                <ShieldCheck size={28} />
-                <h3>Your safety matters.</h3>
-                <p>
-                  Only contact support through official channels.
-                  Never share your OTP, PIN, or password with anyone.
-                </p>
-              </div>
-            </div>
-          </>}
-
-          {!selected && page === "shield" && <>
-            <PageIntro
-              title="ONE Shield"
-              subtitle="A basic warning check for suspicious messages and payment requests."
-              icon={ShieldCheck}
-            />
-
-            <div className="shield-layout">
-              <div className="panel shield-panel">
-                <div className="shield-top">
-                  <div className="feature-icon mint"><ShieldCheck /></div>
-                  <div>
-                    <h2>Check before you trust.</h2>
-                    <p>Paste a suspicious message or payment request.</p>
-                  </div>
-                </div>
-
-                <textarea
-                  value={shieldText}
-                  onChange={e => setShieldText(e.target.value)}
-                  placeholder="Paste the message here..."
-                  rows={6}
-                />
-
-                <button className="primary-button full-button" onClick={checkScam}>
-                  <Eye size={17} /> Check this message
-                </button>
-
-                {shieldResult && (
-                  <div className="shield-result">
-                    <h3>{shieldResult.level}</h3>
-                    {shieldResult.reasons.map((r, i) => (
-                      <p key={i}><AlertTriangle size={15} /> {r}</p>
-                    ))}
-                    <div className="warning-note">
-                      <Info size={18} />
-                      <p>{shieldResult.advice}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="side-info-card">
-                <LockKeyhole size={28} />
-                <h3>Keep these private</h3>
-                <ul>
-                  <li>One-time passwords (OTPs)</li>
-                  <li>PINs and passwords</li>
-                  <li>Full card details</li>
-                  <li>Remote access to your device</li>
-                </ul>
-              </div>
-            </div>
-          </>}
-
-          {!selected && page === "cases" && <>
-            <PageIntro
-              title="ONE Case Builder"
-              subtitle="Turn a confusing payment issue into a clear support request."
-              icon={FileText}
-            />
-
-            <div className="case-layout">
-              <div className="panel case-builder">
-                <div className="builder-heading">
-                  <div className="feature-icon lavender"><FileText /></div>
-                  <div>
-                    <h2>Build your support case</h2>
-                    <p>Prepare the details before contacting official support.</p>
-                  </div>
-                </div>
-
-                <label className="field-label">Choose a transaction</label>
-                <select
-                  value={caseTransactionRef}
-                  onChange={e => {
-                    setCaseTransactionRef(e.target.value);
-                    setComplaint("");
-                  }}
-                >
-                  {transactions.map(t => (
-                    <option key={t.reference} value={t.reference}>
-                      {t.name} · {t.reference} · {money(t.amount)}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="selected-case-summary">
-                  <div>
-                    <span>Transaction status</span>
-                    <strong className={`status ${statusClass(caseTransaction.status)}`}>
-                      {caseTransaction.status}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Amount</span>
-                    <strong>{money(caseTransaction.amount)}</strong>
-                  </div>
-                  <div>
-                    <span>Reference</span>
-                    <strong>{caseTransaction.reference}</strong>
-                  </div>
-                </div>
-
-                <label className="field-label">
-                  What issue do you need help with?
-                </label>
-                <select
-                  value={caseIssue}
-                  onChange={e => {
-                    setCaseIssue(e.target.value);
-                    setComplaint("");
-                  }}
-                >
-                  <option>Payment is pending</option>
-                  <option>Payment failed</option>
-                  <option>Money deducted but payment failed</option>
-                  <option>Refund not received</option>
-                  <option>Unexpected transaction</option>
-                  <option>Other payment issue</option>
-                </select>
-
-                <button
-                  className="primary-button full-button"
-                  onClick={generateComplaint}
-                >
-                  <Sparkles size={17} /> Generate complaint
-                </button>
-
-                <label className="field-label">
-                  Your support-ready complaint (editable)
-                </label>
-                <textarea
-                  className="complaint-box"
-                  rows={10}
-                  value={complaint}
-                  onChange={e => setComplaint(e.target.value)}
-                  placeholder="Your generated complaint will appear here. You can edit it before copying."
-                />
-
-                <div className="button-row">
-                  <button
-                    className="secondary-button"
-                    onClick={copyComplaint}
-                    disabled={!complaint.trim()}
-                  >
-                    <Copy size={16} /> Copy complaint
-                  </button>
-                  <button className="primary-button" onClick={createDemoCase}>
-                    <Plus size={16} /> Create demo case
-                  </button>
-                </div>
-
-                {copyMessage && (
-                  <p className="inline-feedback">
-                    <Info size={15} /> {copyMessage}
-                  </p>
-                )}
-
-                <div className="demo-disclaimer">
-                  Demo only: this creates a local sample case. It does not
-                  submit a complaint to PayPal, a bank, or any support team.
-                </div>
-              </div>
-
-              <div className="panel evidence-panel">
-                <div className="feature-icon peach"><CheckCircle2 /></div>
-                <h3>Evidence checklist</h3>
-                <p>Collect useful information before contacting support.</p>
-
-                {[
-                  ["screenshot", "Transaction screenshot"],
-                  ["bank", "Bank statement or debit proof"],
-                  ["merchant", "Merchant communication or refund message"],
-                  ["reference", "Transaction reference number"]
-                ].map(([key, label]) => (
-                  <label className="check-row" key={key}>
-                    <input
-                      type="checkbox"
-                      checked={evidence[key as keyof typeof evidence]}
-                      onChange={e => setEvidence(prev => ({
-                        ...prev,
-                        [key]: e.target.checked
-                      }))}
-                    />
-                    <span>{label}</span>
-                  </label>
-                ))}
-
-                <div className="check-progress">
-                  {Object.values(evidence).filter(Boolean).length} of 4 items ready
-                </div>
-
-                <div className="case-tip">
-                  <Info size={17} />
-                  <p>
-                    Never attach passwords, OTPs, PINs, or full card numbers
-                    to a support complaint.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="section-heading">
-              <div>
-                <h3>Your demo cases</h3>
-                <p>Cases created in this prototype.</p>
-              </div>
-              <span className="count-pill">{cases.length} cases</span>
-            </div>
-
-            <div className="case-list">
-              {cases.map(c => (
-                <div className="panel case-card" key={c.id}>
-                  <div className="case-card-top">
-                    <div>
-                      <span className="eyebrow">{c.id}</span>
-                      <h3>{c.title}</h3>
-                      <p>{c.reference} · {c.date}</p>
-                    </div>
-                    <span className={`status ${statusClass(c.status)}`}>
-                      {c.status}
-                    </span>
-                  </div>
-
-                  <div className="timeline">
-                    {c.timeline.map((step, i) => (
-                      <div className="timeline-item" key={i}>
-                        <span className="timeline-dot" />
-                        <span>{step}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>}
-
-          {!selected && page === "insights" && <>
-            <PageIntro
-              title="ONE Insights"
-              subtitle="A simple view of the spending patterns in this sample account."
-              icon={BarChart3}
-            />
-
-            <div className="stats-grid">
-              <div className="stat-card">
-                <span>Total sent</span>
-                <strong>{money(transactions.filter(t => t.type === "sent").reduce((a, t) => a + t.amount, 0))}</strong>
-                <small>Across sample records</small>
-              </div>
-              <div className="stat-card">
-                <span>Total received</span>
-                <strong>{money(transactions.filter(t => t.type === "received").reduce((a, t) => a + t.amount, 0))}</strong>
-                <small>Across sample records</small>
-              </div>
-              <div className="stat-card">
-                <span>Completed</span>
-                <strong>{transactions.filter(t => t.status === "Completed").length}</strong>
-                <small>Sample transactions</small>
-              </div>
-              <div className="stat-card">
-                <span>Needs attention</span>
-                <strong>{transactions.filter(t => t.status !== "Completed").length}</strong>
-                <small>Pending or failed</small>
-              </div>
-            </div>
-
-            <div className="panel insights-panel">
-              <h3>Where your sample spending goes</h3>
-              {transactions.filter(t => t.type === "sent").map(t => {
-                const total = transactions
-                  .filter(x => x.type === "sent")
-                  .reduce((a, x) => a + x.amount, 0);
-
-                return (
-                  <div className="bar-row" key={t.id}>
-                    <div>
-                      <strong>{t.name}</strong>
-                      <span>{money(t.amount)}</span>
-                    </div>
-                    <div className="bar-track">
-                      <i style={{ width: `${(t.amount / total) * 100}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-              <p className="demo-disclaimer">
-                Illustrative breakdown based only on the sample transactions
-                shown in this prototype.
-              </p>
-            </div>
-          </>}
-
-          {!selected && page === "access" && <>
-            <PageIntro
-              title="ONE Access+"
-              subtitle="A more comfortable and understandable payment experience."
-              icon={Accessibility}
-            />
-
-            <div className="access-layout">
-              <div className="panel access-settings">
-                <div className="access-heading">
-                  <div className="feature-icon mint"><Accessibility /></div>
-                  <div>
-                    <h2>Make it work for you.</h2>
-                    <p>Adjust how MyPal ONE looks and explains information.</p>
-                  </div>
-                </div>
-
-                <Toggle
-                  label="Large text"
-                  description="Increase text size across the app."
-                  checked={access.largeText}
-                  onChange={v => setAccess(a => ({ ...a, largeText: v }))}
-                />
-
-                <Toggle
-                  label="Simple language"
-                  description="Prefer straightforward explanations."
-                  checked={access.simpleLanguage}
-                  onChange={v => setAccess(a => ({ ...a, simpleLanguage: v }))}
-                />
-
-                <Toggle
-                  label="High contrast"
-                  description="Make text and interface elements easier to distinguish."
-                  checked={access.highContrast}
-                  onChange={v => setAccess(a => ({ ...a, highContrast: v }))}
-                />
-
-                <Toggle
-                  label="Guided explanations"
-                  description="Show a step-by-step path through payment guidance."
-                  checked={access.guided}
-                  onChange={v => setAccess(a => ({ ...a, guided: v }))}
-                />
-
-                <div className="access-speech">
-                  <div>
-                    <Volume2 size={19} />
-                    <div>
-                      <strong>Read aloud</strong>
-                      <p>Listen to guidance instead of reading it.</p>
-                    </div>
-                  </div>
-                  <div className="button-row">
+                  return (
                     <button
-                      className="secondary-button"
-                      onClick={() => speak(
-                        "Welcome to ONE Access Plus. You can turn on large text, simple language, high contrast, and guided explanations. Choose a transaction to understand what happened and what to do next."
-                      )}
+                      key={item.id}
+                      className={`nav-item ${page === item.id ? "active" : ""}`}
+                      onClick={() => {
+                        setPage(item.id);
+                        setSelected(null);
+                        setMobileMenu(false);
+                      }}
                     >
-                      <Play size={15} /> Play preview
+                      <Icon size={18} />
+                      <span>{item.label}</span>
+                      {item.id === "cases" &&
+                        <span className="nav-count">{cases.length}</span>}
                     </button>
-                    <button className="secondary-button" onClick={stopSpeaking}>
-                      <StopCircle size={15} /> Stop
-                    </button>
-                  </div>
+                  );
+                })}
+              </div>
+            ))}
+
+            <div className="sidebar-bottom">
+              <div className="help-card">
+                <div className="help-icon"><Headphones size={19} /></div>
+                <strong>Need a hand?</strong>
+                <p>ONE Assist is here whenever you need help.</p>
+                <button onClick={() => setChatWidgetOpen(true)}>
+                  Chat with ONE Assist <ArrowRight size={14} />
+                </button>
+              </div>
+              <div className="sidebar-footer">
+                <ShieldCheck size={15} /> Your clarity comes first.
+              </div>
+            </div>
+          </aside>
+
+          <main className="main">
+            <header className="topbar">
+              <div className="topbar-left">
+                <button
+                  className="mobile-menu icon-button"
+                  onClick={() => setMobileMenu(true)}
+                >
+                  <Menu size={20} />
+                </button>
+
+                <div>
+                  <div className="breadcrumb">MyPal ONE / {pageTitle}</div>
+                  <h1>{pageTitle}</h1>
                 </div>
               </div>
 
-              <div className="panel access-preview">
-                <span className="eyebrow">LIVE PREVIEW</span>
-                <h2>Your payments, explained simply.</h2>
-                <p>
-                  {access.simpleLanguage
-                    ? "Your payment is still being checked. Wait for the final update before paying again."
-                    : "Your transaction is pending and awaiting final confirmation from the relevant payment provider."}
-                </p>
-
-                <div className="preview-status">
-                  <Clock3 size={17} /> Payment pending
-                </div>
+              <div className="topbar-actions">
+                <label className="search-box">
+                  <Search size={17} />
+                  <input
+                    placeholder="Search transactions..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+                </label>
 
                 <button
-                  className="primary-button"
-                  onClick={() => {
-                    setPage("track");
-                    setSelected(null);
-                  }}
+                  className="icon-button"
+                  onClick={() => setDark(!dark)}
+                  title="Toggle theme"
                 >
-                  Explore guided tracking <ArrowRight size={15} />
+                  {dark ? <Sun size={19} /> : <Moon size={19} />}
                 </button>
 
-                {access.guided && (
-                  <div className="guided-box">
-                    <h3>Guided walkthrough</h3>
-                    <p>{[
-                      "Step 1: Open ONE Track and choose a transaction.",
-                      "Step 2: Read what happened and why.",
-                      "Step 3: Check what happens to your money.",
-                      "Step 4: Follow the recommended next steps or build a support case."
-                    ][guidedStep]}</p>
+                <div className="notification-wrap">
+                  <button
+                    className="icon-button notification-button"
+                    onClick={() => setAlertsOpen(!alertsOpen)}
+                  >
+                    <Bell size={19} />
+                    {settings.alerts && <i />}
+                  </button>
+
+                  {alertsOpen && (
+                    <div className="notification-pop">
+                      <strong>Notifications</strong>
+                      <p><Clock3 size={15} /> Amazon payment is pending.</p>
+                      <p><ShieldAlert size={15} /> Review your failed Myntra payment.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </header>
+
+            <div className="content">
+              {selected && <TransactionExplain t={selected} />}
+
+              {!selected && page === "dashboard" && <>
+                <div className="welcome-row">
+                  <div>
+                    <span className="eyebrow">YOUR MONEY, MADE CLEARER</span>
+                    <h2>Good to see you again.</h2>
+                    <p>Here's what's happening with your transactions.</p>
+                  </div>
+                  <div className="dashboard-actions">
+                    <div className="date-chip"><Activity size={15} /> Demo account</div>
+                    <div className="button-row">
+                      <button className="primary-button" onClick={() => openTransfer("send")}><Send size={16} /> Send money</button>
+                      <button className="secondary-button" onClick={() => openTransfer("receive")}><ArrowDownLeft size={16} /> Receive money</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="wallet-balance-card">
+                  <div>
+                    <span className="eyebrow">ONE WALLET · DEMO BALANCE</span>
+                    <h2>{money(walletBalance)}</h2>
+                    <p>Available demo balance · Transfers update this prototype only</p>
+                  </div>
+                  <div className="wallet-balance-icon"><Wallet size={27} /></div>
+                </div>
+
+                <div className="hero-banner">
+                  <div className="hero-copy">
+                    <span className="hero-tag">
+                      <Sparkles size={13} /> INTRODUCING MY PAL ONE
+                    </span>
+                    <h2>
+                      Payments are complicated.<br />
+                      <em>Understanding them shouldn't be.</em>
+                    </h2>
+                    <p>
+                      Understand transactions, prepare support requests,
+                      and make payments more accessible.
+                    </p>
+                    <button onClick={() => setPage("track")}>
+                      Explore ONE Track <ArrowRight size={16} />
+                    </button>
+                  </div>
+
+                  <div className="hero-art">
+                    <div className="orbit orbit-one" />
+                    <div className="orbit orbit-two" />
+                    <div className="hero-symbol"><Zap size={48} fill="white" /></div>
+                    <div className="floating-chip chip-a">
+                      <CheckCircle2 size={15} /> Clear status
+                    </div>
+                    <div className="floating-chip chip-b">
+                      <ShieldCheck size={15} /> Safer choices
+                    </div>
+                  </div>
+                </div>
+
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      <span>Total transactions</span>
+                      <span className="stat-icon blue"><CreditCard size={18} /></span>
+                    </div>
+                    <strong>{transactions.length}</strong>
+                    <small>In this sample account</small>
+                  </div>
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      <span>Money sent</span>
+                      <span className="stat-icon purple"><ArrowUpRight size={18} /></span>
+                    </div>
+                    <strong>{money(transactions.filter(t => t.type === "sent").reduce((a, t) => a + t.amount, 0))}</strong>
+                    <small>Sample transaction total</small>
+                  </div>
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      <span>Money received</span>
+                      <span className="stat-icon green"><ArrowDownLeft size={18} /></span>
+                    </div>
+                    <strong>{money(transactions.filter(t => t.type === "received").reduce((a, t) => a + t.amount, 0))}</strong>
+                    <small>Sample transaction total</small>
+                  </div>
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      <span>Needs attention</span>
+                      <span className="stat-icon orange"><AlertTriangle size={18} /></span>
+                    </div>
+                    <strong>{transactions.filter(t => t.status !== "Completed").length}</strong>
+                    <small>Pending or failed</small>
+                  </div>
+                </div>
+
+                <div className="section-heading">
+                  <div>
+                    <h3>Recent transactions</h3>
+                    <p>Select any transaction to understand it.</p>
+                  </div>
+                  <button className="text-button" onClick={() => setPage("track")}>
+                    View all <ArrowRight size={15} />
+                  </button>
+                </div>
+
+                <div className="panel transaction-list">
+
+                  {loadingTransactions && (
+                    <p>Loading transactions...</p>
+                  )}
+
+                  {transactionError && (
+                    <p role="alert">{transactionError}</p>
+                  )}
+
+                  {!loadingTransactions && transactions.length === 0 && (
+                    <p>No transactions available.</p>
+                  )}
+
+                  {transactions.slice(0, 4).map(t => (
+                    <TransactionRow key={t.id} t={t} />
+                  ))}
+
+                </div>
+                <div className="feature-grid">
+                  <button
+                    className="feature-card"
+                    onClick={() => setChatWidgetOpen(true)}
+                  >
+                    <div className="feature-icon lavender"><MessageCircle /></div>
+                    <strong>ONE Assist</strong>
+                    <p>Ask questions in simple language.</p>
+                    <ArrowRight size={17} />
+                  </button>
+
+                  <button
+                    className="feature-card"
+                    onClick={() => setPage("cases")}
+                  >
+                    <div className="feature-icon peach"><FileText /></div>
+                    <strong>ONE Case Builder</strong>
+                    <p>Prepare a support-ready complaint.</p>
+                    <ArrowRight size={17} />
+                  </button>
+
+                  <button
+                    className="feature-card"
+                    onClick={() => setPage("access")}
+                  >
+                    <div className="feature-icon mint"><Accessibility /></div>
+                    <strong>ONE Access+</strong>
+                    <p>Make payment guidance easier to use.</p>
+                    <ArrowRight size={17} />
+                  </button>
+                </div>
+              </>}
+
+
+
+              {!selected && page === "track" && <>
+                <PageIntro
+                  title="ONE Track"
+                  subtitle="Follow what happened to a payment and understand what to do next."
+                  icon={Activity}
+                />
+                <div className="track-banner">
+                  <div>
+                    <span className="eyebrow">TRANSACTION CLARITY</span>
+                    <h2>Every payment has a story.</h2>
+                    <p>
+                      Choose a transaction below to see its status, possible
+                      explanation, and recommended next steps.
+                    </p>
+                  </div>
+                  <div className="track-graphic"><Activity size={48} /></div>
+                </div>
+
+                <div className="section-heading">
+                  <div>
+                    <h3>Choose a transaction</h3>
+                    <p>Tap a row to open ONE Explain.</p>
+                  </div>
+                </div>
+
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                    marginBottom: "16px"
+                  }}
+                >
+                  <select
+                    value={statusFilter}
+                    onChange={e => setStatusFilter(e.target.value)}
+                    style={{ padding: "10px", borderRadius: "8px" }}
+                  >
+                    <option value="All">All statuses</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Failed">Failed</option>
+                  </select>
+
+                  <select
+                    value={typeFilter}
+                    onChange={e => setTypeFilter(e.target.value)}
+                    style={{ padding: "10px", borderRadius: "8px" }}
+                  >
+                    <option value="All">All types</option>
+                    <option value="sent">Sent</option>
+                    <option value="received">Received</option>
+                  </select>
+
+                  <button
+                    onClick={() => {
+                      setStatusFilter("All");
+                      setTypeFilter("All");
+                      setSearch("");
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </div>
+
+                <div className="panel transaction-list">
+                  {transactions.map(t => <TransactionRow key={t.id} t={t} />)}
+                </div>
+              </>}
+
+              {!selected && page === "resolve" && <>
+                <PageIntro
+                  title="ONE Resolve"
+                  subtitle="A step-by-step guide to preparing for a payment issue."
+                  icon={LifeBuoy}
+                />
+
+                <div className="smart-guidance-grid">
+                  <div className="panel smart-guidance-card">
+                    <span className="eyebrow"><Sparkles size={13} /> ONE SMART JOURNEY</span>
+                    <h3>Your next best steps, in one place.</h3>
+                    <p>ONE Resolve brings the guided journey together: verify the payment, check your bank entry, collect evidence, then contact verified support.</p>
+                    <ol>
+                      <li>Understand the transaction status</li>
+                      <li>Confirm whether money was debited</li>
+                      <li>Keep the reference and supporting evidence</li>
+                      <li>Use the official provider's support channel</li>
+                    </ol>
+                  </div>
+                  <div className="panel smart-guidance-card">
+                    <span className="eyebrow"><Bell size={13} /> ONE SMART ALERTS</span>
+                    <h3>Important things to notice.</h3>
+                    <p>These alerts are generated from the demo transaction records, not from a live bank connection.</p>
+                    {transactions.filter(t => t.status !== "Completed").slice(0, 3).map(t => (
+                      <button className="smart-alert-row" key={t.reference} onClick={() => setSelected(t)}>
+                        <AlertTriangle size={16} />
+                        <span><strong>{t.name}</strong><small>{t.status} · {t.reference}</small></span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                    {transactions.every(t => t.status === "Completed") && <p>No pending or failed demo transactions right now.</p>}
+                  </div>
+                </div>
+
+                <div className="resolve-layout">
+                  <div className="panel resolve-panel">
+                    <span className="eyebrow">GUIDED RESOLUTION</span>
+                    <h2>Let's understand the issue.</h2>
+
+                    <label className="field-label">What issue are you facing?</label>
+                    <select
+                      value={issue}
+                      onChange={e => {
+                        setIssue(e.target.value);
+                        setResolveStep(0);
+                      }}
+                    >
+                      <option>Failed payment</option>
+                      <option>Payment pending</option>
+                      <option>Refund not received</option>
+                      <option>Money deducted twice</option>
+                      <option>Unknown transaction</option>
+                    </select>
+
+                    <label className="field-label">Amount involved (₹)</label>
+                    <input
+                      value={issueAmount}
+                      onChange={e => setIssueAmount(e.target.value)}
+                      type="number"
+                    />
+
+                    <div className="resolve-progress">
+                      <span>Step {resolveStep + 1} of {resolveAdvice.length}</span>
+                      <div>
+                        <i style={{
+                          width: `${((resolveStep + 1) / resolveAdvice.length) * 100}%`
+                        }} />
+                      </div>
+                    </div>
+
+                    <div className="resolve-step">
+                      <span className="step-number">0{resolveStep + 1}</span>
+                      <div>
+                        <h3>{[
+                          "Check the transaction",
+                          "Verify the bank entry",
+                          "Collect your evidence",
+                          "Contact official support"
+                        ][resolveStep]}</h3>
+                        <p>{resolveAdvice[resolveStep]}</p>
+                      </div>
+                    </div>
 
                     <div className="button-row">
                       <button
                         className="secondary-button"
-                        disabled={guidedStep === 0}
-                        onClick={() => setGuidedStep(s => s - 1)}
+                        disabled={resolveStep === 0}
+                        onClick={() => setResolveStep(s => s - 1)}
                       >
-                        Back
+                        Previous
                       </button>
                       <button
                         className="primary-button"
-                        onClick={() => setGuidedStep(s => s === 3 ? 0 : s + 1)}
+                        onClick={() =>
+                          resolveStep === 3
+                            ? openCaseBuilder()
+                            : setResolveStep(s => s + 1)
+                        }
                       >
-                        {guidedStep === 3 ? "Restart" : "Next"}
-                        <ArrowRight size={15} />
+                        {resolveStep === 3 ? "Build support case" : "Next step"}
+                        <ArrowRight size={16} />
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
-          </>}
 
-          {!selected && page === "settings" && <>
-            <PageIntro
-              title="Settings"
-              subtitle="Manage your MyPal ONE demo preferences."
-              icon={Settings}
-            />
-
-            <div className="panel settings-panel">
-              <Toggle
-                label="Notifications"
-                description="Show sample payment alerts in the notification menu."
-                checked={settings.alerts}
-                onChange={v => setSettings(s => ({ ...s, alerts: v }))}
-              />
-
-              <Toggle
-                label="Simple language by default"
-                description="Use simpler wording in guidance."
-                checked={settings.simple}
-                onChange={v => {
-                  setSettings(s => ({ ...s, simple: v }));
-                  setAccess(a => ({ ...a, simpleLanguage: v }));
-                }}
-              />
-
-              <Toggle
-                label="Insights"
-                description="Enable spending insight features in this demo."
-                checked={settings.insights}
-                onChange={v => setSettings(s => ({ ...s, insights: v }))}
-              />
-
-              <Toggle
-                label="Dark mode"
-                description="Switch to a darker interface."
-                checked={dark}
-                onChange={setDark}
-              />
-
-              <div className="settings-footnote">
-                <Info size={17} />
-                This is an independent demonstration prototype using sample data.
-                It is not connected to PayPal or a bank.
-              </div>
-            </div>
-          </>}
-        </div>
-
-        <footer className="app-footer">
-          <span>MyPal ONE · Independent prototype</span>
-          <span>Built for clarity, confidence & accessibility</span>
-        </footer>
-      </main>
-
-      {/* MOBILE NAVIGATION — ONE ASSIST REMOVED */}
-      <nav className="mobile-nav">
-        {[
-          ["dashboard", Home, "Home"],
-          ["transactions", CreditCard, "Activity"],
-          ["cases", FileText, "Cases"],
-          ["access", Accessibility, "Access"]
-        ].map(([id, Icon, label]: any) => (
-          <button
-            key={id}
-            className={page === id ? "active" : ""}
-            onClick={() => {
-              setPage(id);
-              setSelected(null);
-            }}
-          >
-            <Icon size={19} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
-
-      {/* FLOATING CHAT WIDGET — AVAILABLE ON EVERY PAGE */}
-      <div className="floating-chat">
-        {transferOpen && (
-          <div className="modal-backdrop" onClick={() => setTransferOpen(null)}>
-            <div className="transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title" onClick={e => e.stopPropagation()}>
-              <div className="modal-heading">
-                <div>
-                  <span className="eyebrow">ONE WALLET</span>
-                  <h2 id="transfer-title">{transferOpen === "send" ? "Send money" : "Receive money"}</h2>
-                  <p>{transferOpen === "send" ? "Create a simulated transfer with a live currency estimate." : "Create a demo request code or record a simulated incoming payment."}</p>
+                  <div className="side-info-card">
+                    <ShieldCheck size={28} />
+                    <h3>Your safety matters.</h3>
+                    <p>
+                      Only contact support through official channels.
+                      Never share your OTP, PIN, or password with anyone.
+                    </p>
+                  </div>
                 </div>
-                <button className="icon-button" onClick={() => setTransferOpen(null)} aria-label="Close"><X size={19} /></button>
-              </div>
+              </>}
 
-              {transferOpen === "send" && (
-                <label className="field-label">Recipient name / payment handle
-                  <input value={transferRecipient} onChange={e => setTransferRecipient(e.target.value)} placeholder="e.g. Alex or alex@example" />
-                </label>
-              )}
-              <label className="field-label">Amount
-                <input type="number" min="0" step="0.01" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} placeholder="Enter amount" />
-              </label>
-              <label className="field-label">Currency
-                <select value={transferCurrency} onChange={e => setTransferCurrency(e.target.value as CurrencyCode)}>
-                  {(Object.keys(currencyNames) as CurrencyCode[]).map(code => <option key={code} value={code}>{code} — {currencyNames[code]}</option>)}
-                </select>
-              </label>
+              {!selected && page === "shield" && <>
+                <PageIntro
+                  title="ONE Shield"
+                  subtitle="A basic warning check for suspicious messages and payment requests."
+                  icon={ShieldCheck}
+                />
 
-              <div className="conversion-preview">
-                {transferCurrency === "INR" ? (
-                  <><span>Wallet amount</span><strong>{Number.isFinite(parsedTransferAmount) && parsedTransferAmount > 0 ? money(parsedTransferAmount) : "₹0"}</strong></>
-                ) : (
-                  <>
-                    <span>Estimated INR equivalent</span>
-                    <strong>{convertedTransferAmount > 0 ? money(convertedTransferAmount) : "—"}</strong>
-                    <small>{ratesLoading ? "Loading exchange rate…" : selectedRate ? `1 INR = ${selectedRate.toFixed(6)} ${transferCurrency} · 1 ${transferCurrency} = ${(1 / selectedRate).toFixed(6)} INR` : "Exchange rate unavailable"}</small>
-                  </>
-                )}
-                {ratesUpdatedAt && <small>Rates last updated: {ratesUpdatedAt}</small>}
-                {ratesError && <small className="rate-warning">{ratesError}</small>}
-              </div>
+                <div className="shield-layout">
+                  <div className="panel shield-panel">
+                    <div className="shield-top">
+                      <div className="feature-icon mint"><ShieldCheck /></div>
+                      <div>
+                        <h2>Check before you trust.</h2>
+                        <p>Paste a suspicious message or payment request.</p>
+                      </div>
+                    </div>
 
-              <label className="field-label">Note (optional)
-                <input value={transferNote} onChange={e => setTransferNote(e.target.value)} placeholder="What's this payment for?" />
-              </label>
-              {transferOpen === "send" && <p className="wallet-available">Available demo balance: <strong>{money(walletBalance)}</strong></p>}
-              {transferError && <p className="form-error" role="alert">{transferError}</p>}
+                    <textarea
+                      value={shieldText}
+                      onChange={e => setShieldText(e.target.value)}
+                      placeholder="Paste the message here..."
+                      rows={6}
+                    />
 
-              {transferOpen === "receive" && (
-                <div className="receive-request-area">
-                  <button className="secondary-button" onClick={createReceiveRequest}>Generate receive request code</button>
-                  {receiveCode && <div className="request-code"><span>Share this demo request code</span><strong>{receiveCode}</strong><button className="text-button" onClick={() => navigator.clipboard?.writeText(receiveCode)}>Copy code</button></div>}
-                  <p className="demo-disclaimer">A request code is a demo reference only. It does not create a real payment link.</p>
+                    <button className="primary-button full-button" onClick={checkScam}>
+                      <Eye size={17} /> Check this message
+                    </button>
+
+                    {shieldResult && (
+                      <div className="shield-result">
+                        <h3>{shieldResult.level}</h3>
+                        {shieldResult.reasons.map((r, i) => (
+                          <p key={i}><AlertTriangle size={15} /> {r}</p>
+                        ))}
+                        <div className="warning-note">
+                          <Info size={18} />
+                          <p>{shieldResult.advice}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="side-info-card">
+                    <LockKeyhole size={28} />
+                    <h3>Keep these private</h3>
+                    <ul>
+                      <li>One-time passwords (OTPs)</li>
+                      <li>PINs and passwords</li>
+                      <li>Full card details</li>
+                      <li>Remote access to your device</li>
+                    </ul>
+                  </div>
                 </div>
-              )}
+              </>}
 
-              <div className="button-row modal-actions">
-                <button className="secondary-button" onClick={() => setTransferOpen(null)}>Cancel</button>
-                <button className="primary-button" onClick={completeDemoTransfer}>{transferOpen === "send" ? "Confirm demo transfer" : "Record demo receipt"} <ArrowRight size={16} /></button>
-              </div>
-              <p className="demo-disclaimer">Demo mode: this prototype does not connect to a bank, payment network, or real recipient. No real money is transferred.</p>
+              {!selected && page === "cases" && <>
+                <PageIntro
+                  title="ONE Case Builder"
+                  subtitle="Turn a confusing payment issue into a clear support request."
+                  icon={FileText}
+                />
+
+                <div className="case-layout">
+                  <div className="panel case-builder">
+                    <div className="builder-heading">
+                      <div className="feature-icon lavender"><FileText /></div>
+                      <div>
+                        <h2>Build your support case</h2>
+                        <p>Prepare the details before contacting official support.</p>
+                      </div>
+                    </div>
+
+                    <label className="field-label">Choose a transaction</label>
+                    <select
+                      value={caseTransactionRef}
+                      onChange={e => {
+                        setCaseTransactionRef(e.target.value);
+                        setComplaint("");
+                      }}
+                    >
+                      {transactions.map(t => (
+                        <option key={t.reference} value={t.reference}>
+                          {t.name} · {t.reference} · {
+                            formatCurrency(t.amount, (t.currency || "INR") as CurrencyCode)
+                          }
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="selected-case-summary">
+                      <div>
+                        <span>Transaction status</span>
+                        <strong className={`status ${statusClass(caseTransaction.status)}`}>
+                          {caseTransaction.status}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Amount</span>
+                        <strong>
+                          {formatCurrency(
+                            caseTransaction.amount,
+                            (caseTransaction.currency || "INR") as CurrencyCode
+                          )}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Reference</span>
+                        <strong>{caseTransaction.reference}</strong>
+                      </div>
+                    </div>
+
+                    <label className="field-label">
+                      What issue do you need help with?
+                    </label>
+                    <select
+                      value={caseIssue}
+                      onChange={e => {
+                        setCaseIssue(e.target.value);
+                        setComplaint("");
+                      }}
+                    >
+                      <option>Payment is pending</option>
+                      <option>Payment failed</option>
+                      <option>Money deducted but payment failed</option>
+                      <option>Refund not received</option>
+                      <option>Unexpected transaction</option>
+                      <option>Other payment issue</option>
+                    </select>
+
+                    <button
+                      className="primary-button full-button"
+                      onClick={generateComplaint}
+                    >
+                      <Sparkles size={17} /> Generate complaint
+                    </button>
+
+                    <label className="field-label">
+                      Your support-ready complaint (editable)
+                    </label>
+                    <textarea
+                      className="complaint-box"
+                      rows={10}
+                      value={complaint}
+                      onChange={e => setComplaint(e.target.value)}
+                      placeholder="Your generated complaint will appear here. You can edit it before copying."
+                    />
+
+                    <div className="button-row">
+                      <button
+                        className="secondary-button"
+                        onClick={copyComplaint}
+                        disabled={!complaint.trim()}
+                      >
+                        <Copy size={16} /> Copy complaint
+                      </button>
+                      <button
+                        className="secondary-button"
+                        onClick={downloadComplaintPDF}
+                        disabled={!complaint.trim()}
+                      >
+                        <FileText size={16} /> Download PDF
+                      </button>
+                      <button
+                        className="primary-button"
+                        onClick={createDemoCase}
+                        disabled={!complaint.trim()}
+                      >
+                        <Plus size={16} /> Create demo case
+                      </button>
+                    </div>
+
+                    {copyMessage && (
+                      <p className="inline-feedback">
+                        <Info size={15} /> {copyMessage}
+                      </p>
+                    )}
+
+                    <div className="demo-disclaimer">
+                      Demo only: this creates a local sample case. It does not
+                      submit a complaint to PayPal, a bank, or any support team.
+                    </div>
+                  </div>
+
+                  <div className="panel evidence-panel">
+                    <div className="feature-icon peach"><CheckCircle2 /></div>
+                    <h3>Evidence checklist</h3>
+                    <p>Collect useful information before contacting support.</p>
+
+                    {[
+                      ["screenshot", "Transaction screenshot"],
+                      ["bank", "Bank statement or debit proof"],
+                      ["merchant", "Merchant communication or refund message"],
+                      ["reference", "Transaction reference number"]
+                    ].map(([key, label]) => (
+                      <label className="check-row" key={key}>
+                        <input
+                          type="checkbox"
+                          checked={evidence[key as keyof typeof evidence]}
+                          onChange={e => setEvidence(prev => ({
+                            ...prev,
+                            [key]: e.target.checked
+                          }))}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+
+                    <div className="check-progress">
+                      {Object.values(evidence).filter(Boolean).length} of 4 items ready
+                    </div>
+
+                    <div className="case-tip">
+                      <Info size={17} />
+                      <p>
+                        Never attach passwords, OTPs, PINs, or full card numbers
+                        to a support complaint.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="section-heading">
+                  <div>
+                    <h3>Your demo cases</h3>
+                    <p>Cases created in this prototype.</p>
+                  </div>
+                  <span className="count-pill">{cases.length} cases</span>
+                </div>
+
+                <div className="case-list">
+                  {cases.map(c => (
+                    <div className="panel case-card" key={c.id}>
+                      <div className="case-card-top">
+                        <div>
+                          <span className="eyebrow">{c.id}</span>
+                          <h3>{c.title}</h3>
+                          <p>{c.reference} · {c.date}</p>
+                        </div>
+                        <span className={`status ${statusClass(c.status)}`}>
+                          {c.status}
+                        </span>
+                      </div>
+
+                      <div className="timeline">
+                        {c.timeline.map((step, i) => (
+                          <div className="timeline-item" key={i}>
+                            <span className="timeline-dot" />
+                            <span>{step}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>}
+
+              {!selected && page === "insights" && <>
+                <PageIntro
+                  title="ONE Insights"
+                  subtitle="A simple view of the spending patterns in this sample account."
+                  icon={BarChart3}
+                />
+
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <span>Total sent</span>
+                    <strong>{money(transactions.filter(t => t.type === "sent").reduce((a, t) => a + t.amount, 0))}</strong>
+                    <small>Across sample records</small>
+                  </div>
+                  <div className="stat-card">
+                    <span>Total received</span>
+                    <strong>{money(transactions.filter(t => t.type === "received").reduce((a, t) => a + t.amount, 0))}</strong>
+                    <small>Across sample records</small>
+                  </div>
+                  <div className="stat-card">
+                    <span>Completed</span>
+                    <strong>{transactions.filter(t => t.status === "Completed").length}</strong>
+                    <small>Sample transactions</small>
+                  </div>
+                  <div className="stat-card">
+                    <span>Needs attention</span>
+                    <strong>{transactions.filter(t => t.status !== "Completed").length}</strong>
+                    <small>Pending or failed</small>
+                  </div>
+                </div>
+
+                <div className="panel insights-panel">
+                  <h3>Where your sample spending goes</h3>
+                  {transactions.filter(t => t.type === "sent").map(t => {
+                    const total = transactions
+                      .filter(x => x.type === "sent")
+                      .reduce((a, x) => a + x.amount, 0);
+
+                    return (
+                      <div className="bar-row" key={t.id}>
+                        <div>
+                          <strong>{t.name}</strong>
+                          <span>{money(t.amount)}</span>
+                        </div>
+                        <div className="bar-track">
+                          <i style={{ width: `${(t.amount / total) * 100}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="demo-disclaimer">
+                    Illustrative breakdown based only on the sample transactions
+                    shown in this prototype.
+                  </p>
+                </div>
+              </>}
+
+              {!selected && page === "access" && <>
+                <PageIntro
+                  title="ONE Access+"
+                  subtitle="A more comfortable and understandable payment experience."
+                  icon={Accessibility}
+                />
+
+                <div className="access-layout">
+                  <div className="panel access-settings">
+                    <div className="access-heading">
+                      <div className="feature-icon mint"><Accessibility /></div>
+                      <div>
+                        <h2>Make it work for you.</h2>
+                        <p>Adjust how MyPal ONE looks and explains information.</p>
+                      </div>
+                    </div>
+
+                    <Toggle
+                      label="Large text"
+                      description="Increase text size across the app."
+                      checked={access.largeText}
+                      onChange={v => setAccess(a => ({ ...a, largeText: v }))}
+                    />
+
+                    <Toggle
+                      label="Simple language"
+                      description="Prefer straightforward explanations."
+                      checked={access.simpleLanguage}
+                      onChange={v => setAccess(a => ({ ...a, simpleLanguage: v }))}
+                    />
+
+                    <Toggle
+                      label="High contrast"
+                      description="Make text and interface elements easier to distinguish."
+                      checked={access.highContrast}
+                      onChange={v => setAccess(a => ({ ...a, highContrast: v }))}
+                    />
+
+                    <Toggle
+                      label="Guided explanations"
+                      description="Show a step-by-step path through payment guidance."
+                      checked={access.guided}
+                      onChange={v => setAccess(a => ({ ...a, guided: v }))}
+                    />
+
+                    <div className="access-speech">
+                      <div>
+                        <Volume2 size={19} />
+                        <div>
+                          <strong>Read aloud</strong>
+                          <p>Listen to guidance instead of reading it.</p>
+                        </div>
+                      </div>
+                      <div className="button-row">
+                        <button
+                          className="secondary-button"
+                          onClick={() => speak(
+                            "Welcome to ONE Access Plus. You can turn on large text, simple language, high contrast, and guided explanations. Choose a transaction to understand what happened and what to do next."
+                          )}
+                        >
+                          <Play size={15} /> Play preview
+                        </button>
+                        <button className="secondary-button" onClick={stopSpeaking}>
+                          <StopCircle size={15} /> Stop
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="panel access-preview">
+                    <span className="eyebrow">LIVE PREVIEW</span>
+                    <h2>Your payments, explained simply.</h2>
+                    <p>
+                      {access.simpleLanguage
+                        ? "Your payment is still being checked. Wait for the final update before paying again."
+                        : "Your transaction is pending and awaiting final confirmation from the relevant payment provider."}
+                    </p>
+
+                    <div className="preview-status">
+                      <Clock3 size={17} /> Payment pending
+                    </div>
+
+                    <button
+                      className="primary-button"
+                      onClick={() => {
+                        setPage("track");
+                        setSelected(null);
+                      }}
+                    >
+                      Explore guided tracking <ArrowRight size={15} />
+                    </button>
+
+                    {access.guided && (
+                      <div className="guided-box">
+                        <h3>Guided walkthrough</h3>
+                        <p>{[
+                          "Step 1: Open ONE Track and choose a transaction.",
+                          "Step 2: Read what happened and why.",
+                          "Step 3: Check what happens to your money.",
+                          "Step 4: Follow the recommended next steps or build a support case."
+                        ][guidedStep]}</p>
+
+                        <div className="button-row">
+                          <button
+                            className="secondary-button"
+                            disabled={guidedStep === 0}
+                            onClick={() => setGuidedStep(s => s - 1)}
+                          >
+                            Back
+                          </button>
+                          <button
+                            className="primary-button"
+                            onClick={() => setGuidedStep(s => s === 3 ? 0 : s + 1)}
+                          >
+                            {guidedStep === 3 ? "Restart" : "Next"}
+                            <ArrowRight size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>}
+
+              {!selected && page === "settings" && <>
+                <PageIntro
+                  title="Settings"
+                  subtitle="Manage your MyPal ONE demo preferences."
+                  icon={Settings}
+                />
+
+                <div className="panel settings-panel">
+                  <Toggle
+                    label="Notifications"
+                    description="Show sample payment alerts in the notification menu."
+                    checked={settings.alerts}
+                    onChange={v => setSettings(s => ({ ...s, alerts: v }))}
+                  />
+
+                  <Toggle
+                    label="Simple language by default"
+                    description="Use simpler wording in guidance."
+                    checked={settings.simple}
+                    onChange={v => {
+                      setSettings(s => ({ ...s, simple: v }));
+                      setAccess(a => ({ ...a, simpleLanguage: v }));
+                    }}
+                  />
+
+                  <Toggle
+                    label="Insights"
+                    description="Enable spending insight features in this demo."
+                    checked={settings.insights}
+                    onChange={v => setSettings(s => ({ ...s, insights: v }))}
+                  />
+
+                  <Toggle
+                    label="Dark mode"
+                    description="Switch to a darker interface."
+                    checked={dark}
+                    onChange={setDark}
+                  />
+
+                  <div className="settings-footnote">
+                    <Info size={17} />
+                    This is an independent demonstration prototype using sample data.
+                    It is not connected to PayPal or a bank.
+                  </div>
+                </div>
+              </>}
             </div>
-          </div>
-        )}
 
-        {transferReceipt && (
-          <div className="modal-backdrop" onClick={() => setTransferReceipt(null)}>
-            <div className="transfer-modal receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title" onClick={e => e.stopPropagation()}>
-              <div className="receipt-success"><CheckCircle2 size={34} /><span>DEMO TRANSACTION RECORDED</span></div>
-              <h2 id="receipt-title">{transferReceipt.type === "sent" ? "Transfer summary" : "Receive summary"}</h2>
-              <div className="receipt-amount">{formatCurrency(transferReceipt.convertedAmount, transferReceipt.currency)}</div>
-              <p>{transferReceipt.type === "sent" ? "To" : "Received from"}: <strong>{transferReceipt.recipient}</strong></p>
-              <div className="receipt-details">
-                <div><span>Wallet impact (INR)</span><strong>{transferReceipt.type === "sent" ? "−" : "+"}{money(transferReceipt.amountInr)}</strong></div>
-                {transferReceipt.currency !== "INR" && <div><span>Exchange rate</span><strong>1 INR = {transferReceipt.exchangeRate.toFixed(6)} {transferReceipt.currency}</strong></div>}
-                <div><span>Reference</span><strong>{transferReceipt.reference}</strong></div>
-                <div><span>Date</span><strong>{transferReceipt.date}</strong></div>
-                <div><span>Note</span><strong>{transferReceipt.note}</strong></div>
-                <div><span>Updated demo balance</span><strong>{money(walletBalance)}</strong></div>
-              </div>
-              <div className="button-row">
-                <button className="secondary-button" onClick={() => navigator.clipboard?.writeText(`MyPal ONE demo receipt\nReference: ${transferReceipt.reference}\n${transferReceipt.type === "sent" ? "To" : "From"}: ${transferReceipt.recipient}\nAmount: ${formatCurrency(transferReceipt.convertedAmount, transferReceipt.currency)}\nWallet INR: ${money(transferReceipt.amountInr)}\nDemo only — no real payment.`)}><Copy size={16} /> Copy receipt</button>
-                <button className="primary-button" onClick={() => setTransferReceipt(null)}>Done</button>
-              </div>
-              <p className="demo-disclaimer">This is a locally recorded demo receipt, not proof of a real-world payment.</p>
-            </div>
-          </div>
-        )}
+            <footer className="app-footer">
+              <span>MyPal ONE · Independent prototype</span>
+              <span>Built for clarity, confidence & accessibility</span>
+            </footer>
+          </main>
 
-        {chatWidgetOpen && (
-          <div className="floating-chat-window">
-            <div className="floating-chat-header">
-              <div className="assist-avatar">
-                <Sparkles size={20} />
-              </div>
-
-              <div className="floating-chat-title">
-                <strong>MyPal ONE Assist</strong>
-                <span><i className="online-dot" /> Your payment companion</span>
-              </div>
-
+          {/* MOBILE NAVIGATION — ONE ASSIST REMOVED */}
+          <nav className="mobile-nav">
+            {[
+              ["dashboard", Home, "Home"],
+              ["transactions", CreditCard, "Activity"],
+              ["cases", FileText, "Cases"],
+              ["access", Accessibility, "Access"]
+            ].map(([id, Icon, label]: any) => (
               <button
-                className="icon-button"
-                onClick={() => setChatWidgetOpen(false)}
-                aria-label="Close chat"
+                key={id}
+                className={page === id ? "active" : ""}
+                onClick={() => {
+                  setPage(id);
+                  setSelected(null);
+                }}
               >
-                <X size={18} />
+                <Icon size={19} />
+                <span>{label}</span>
               </button>
-            </div>
+            ))}
+          </nav>
 
-            <div className="floating-chat-intro">
-              <span className="eyebrow">HERE TO HELP</span>
-              <p>Ask me about a payment, refund or transaction.</p>
-            </div>
+          {/* FLOATING CHAT WIDGET — AVAILABLE ON EVERY PAGE */}
+          <div className="floating-chat">
+            {transferOpen && (
+              <div className="modal-backdrop" onClick={() => setTransferOpen(null)}>
+                <div className="transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title" onClick={e => e.stopPropagation()}>
+                  <div className="modal-heading">
+                    <div>
+                      <span className="eyebrow">ONE WALLET</span>
+                      <h2 id="transfer-title">{transferOpen === "send" ? "Send money" : "Receive money"}</h2>
+                      <p>{transferOpen === "send" ? "Create a simulated transfer with a live currency estimate." : "Create a demo request code or record a simulated incoming payment."}</p>
+                    </div>
+                    <button className="icon-button" onClick={() => setTransferOpen(null)} aria-label="Close"><X size={19} /></button>
+                  </div>
 
-            <div className="floating-chat-messages">
-              {messages.map((m, i) => (
-                <div key={i} className={`chat-message ${m.from}`}>
-                  {m.from === "ai" && (
-                    <div className="chat-mini-avatar">
-                      <Sparkles size={13} />
+                  {transferOpen === "send" && (
+                    <label className="field-label">Recipient name / payment handle
+                      <input value={transferRecipient} onChange={e => setTransferRecipient(e.target.value)} placeholder="e.g. Alex or alex@example" />
+                    </label>
+                  )}
+                  <label className="field-label">Amount
+                    <input type="number" min="0" step="0.01" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} placeholder="Enter amount" />
+                  </label>
+                  <label className="field-label">Currency
+                    <select value={transferCurrency} onChange={e => setTransferCurrency(e.target.value as CurrencyCode)}>
+                      {(Object.keys(currencyNames) as CurrencyCode[]).map(code => <option key={code} value={code}>{code} — {currencyNames[code]}</option>)}
+                    </select>
+                  </label>
+
+                  <div className="conversion-preview">
+                    {transferCurrency === "INR" ? (
+                      <><span>Wallet amount</span><strong>{Number.isFinite(parsedTransferAmount) && parsedTransferAmount > 0 ? money(parsedTransferAmount) : "₹0"}</strong></>
+                    ) : (
+                      <>
+                        <span>Estimated INR equivalent</span>
+                        <strong>{convertedTransferAmount > 0 ? money(convertedTransferAmount) : "—"}</strong>
+                        <small>{ratesLoading ? "Loading exchange rate…" : selectedRate ? `1 INR = ${selectedRate.toFixed(6)} ${transferCurrency} · 1 ${transferCurrency} = ${(1 / selectedRate).toFixed(6)} INR` : "Exchange rate unavailable"}</small>
+                      </>
+                    )}
+                    {ratesUpdatedAt && <small>Rates last updated: {ratesUpdatedAt}</small>}
+                    {ratesError && <small className="rate-warning">{ratesError}</small>}
+                  </div>
+
+                  <label className="field-label">Note (optional)
+                    <input value={transferNote} onChange={e => setTransferNote(e.target.value)} placeholder="What's this payment for?" />
+                  </label>
+                  {transferOpen === "send" && <p className="wallet-available">Available demo balance: <strong>{money(walletBalance)}</strong></p>}
+                  {transferError && <p className="form-error" role="alert">{transferError}</p>}
+
+                  {transferOpen === "receive" && (
+                    <div className="receive-request-area">
+                      <button className="secondary-button" onClick={createReceiveRequest}>Generate receive request code</button>
+                      {receiveCode && <div className="request-code"><span>Share this demo request code</span><strong>{receiveCode}</strong><button className="text-button" onClick={() => navigator.clipboard?.writeText(receiveCode)}>Copy code</button></div>}
+                      <p className="demo-disclaimer">A request code is a demo reference only. It does not create a real payment link.</p>
                     </div>
                   )}
-                  <div className="chat-bubble">{m.text}</div>
+
+                  <div className="button-row modal-actions">
+                    <button className="secondary-button" onClick={() => setTransferOpen(null)}>Cancel</button>
+                    <button className="primary-button" onClick={completeDemoTransfer}>{transferOpen === "send" ? "Confirm demo transfer" : "Record demo receipt"} <ArrowRight size={16} /></button>
+                  </div>
+                  <p className="demo-disclaimer">Demo mode: this prototype does not connect to a bank, payment network, or real recipient. No real money is transferred.</p>
                 </div>
-              ))}
-              {chatLoading && (
-  <div className="chat-message ai">
-    <div className="chat-bubble">
-      ONE Assist is typing...
-    </div>
-  </div>
-)}
-            </div>
+              </div>
+            )}
 
-            <div className="floating-chat-suggestions">
-              <button onClick={() => setChatInput("Why is my Amazon payment pending?")}>
-                Amazon payment?
-              </button>
-              <button onClick={() => setChatInput("How do refunds work?")}>
-                Refund help
-              </button>
-              <button onClick={() => setChatInput("Show my failed payments")}>
-                Failed payments
-              </button>
-            </div>
+            {transferReceipt && (
+              <div className="modal-backdrop" onClick={() => setTransferReceipt(null)}>
+                <div className="transfer-modal receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title" onClick={e => e.stopPropagation()}>
+                  <div className="receipt-success"><CheckCircle2 size={34} /><span>DEMO TRANSACTION RECORDED</span></div>
+                  <h2 id="receipt-title">{transferReceipt.type === "sent" ? "Transfer summary" : "Receive summary"}</h2>
+                  <div className="receipt-amount">{formatCurrency(transferReceipt.convertedAmount, transferReceipt.currency)}</div>
+                  <p>{transferReceipt.type === "sent" ? "To" : "Received from"}: <strong>{transferReceipt.recipient}</strong></p>
+                  <div className="receipt-details">
+                    <div><span>Wallet impact (INR)</span><strong>{transferReceipt.type === "sent" ? "−" : "+"}{money(transferReceipt.amountInr)}</strong></div>
+                    {transferReceipt.currency !== "INR" && <div><span>Exchange rate</span><strong>1 INR = {transferReceipt.exchangeRate.toFixed(6)} {transferReceipt.currency}</strong></div>}
+                    <div><span>Reference</span><strong>{transferReceipt.reference}</strong></div>
+                    <div><span>Date</span><strong>{transferReceipt.date}</strong></div>
+                    <div><span>Note</span><strong>{transferReceipt.note}</strong></div>
+                    <div><span>Updated demo balance</span><strong>{money(walletBalance)}</strong></div>
+                  </div>
+                  <div className="button-row">
+                    <button className="secondary-button" onClick={() => navigator.clipboard?.writeText(`MyPal ONE demo receipt\nReference: ${transferReceipt.reference}\n${transferReceipt.type === "sent" ? "To" : "From"}: ${transferReceipt.recipient}\nAmount: ${formatCurrency(transferReceipt.convertedAmount, transferReceipt.currency)}\nWallet INR: ${money(transferReceipt.amountInr)}\nDemo only — no real payment.`)}><Copy size={16} /> Copy receipt</button>
+                    <button className="primary-button" onClick={() => setTransferReceipt(null)}>Done</button>
+                  </div>
+                  <p className="demo-disclaimer">This is a locally recorded demo receipt, not proof of a real-world payment.</p>
+                </div>
+              </div>
+            )}
 
-            <div className="chat-input floating-chat-input">
-              <input
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && sendMessage()}
-                placeholder="Ask MyPal anything..."
-              />
-              <button onClick={sendMessage} aria-label="Send message">
-                <Send size={17} />
-              </button>
-            </div>
+            {chatWidgetOpen && (
+              <div className="floating-chat-window">
+                <div className="floating-chat-header">
+                  <div className="assist-avatar">
+                    <Sparkles size={20} />
+                  </div>
 
-            <p className="demo-disclaimer">
-              Demo assistant · Uses sample transaction data, not live account information.
-            </p>
+                  <div className="floating-chat-title">
+                    <strong>MyPal ONE Assist</strong>
+                    <span><i className="online-dot" /> Your payment companion</span>
+                  </div>
+
+                  <button
+                    className="icon-button"
+                    onClick={() => setChatWidgetOpen(false)}
+                    aria-label="Close chat"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="floating-chat-intro">
+                  <span className="eyebrow">HERE TO HELP</span>
+                  <p>Ask me about a payment, refund or transaction.</p>
+                </div>
+
+                <div className="floating-chat-messages">
+                  {messages.map((m, i) => (
+                    <div key={i} className={`chat-message ${m.from}`}>
+                      {m.from === "ai" && (
+                        <div className="chat-mini-avatar">
+                          <Sparkles size={13} />
+                        </div>
+                      )}
+                      <div className="chat-bubble">{m.text}</div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div className="chat-message ai">
+                      <div className="chat-bubble">
+                        ONE Assist is typing...
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="floating-chat-suggestions">
+                  <button onClick={() => setChatInput("Why is my Amazon payment pending?")}>
+                    Amazon payment?
+                  </button>
+                  <button onClick={() => setChatInput("How do refunds work?")}>
+                    Refund help
+                  </button>
+                  <button onClick={() => setChatInput("Show my failed payments")}>
+                    Failed payments
+                  </button>
+                </div>
+
+                <div className="chat-input floating-chat-input">
+                  <input
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && sendMessage()}
+                    placeholder="Ask MyPal anything..."
+                  />
+                  <button onClick={sendMessage} aria-label="Send message">
+                    <Send size={17} />
+                  </button>
+                </div>
+
+                <p className="demo-disclaimer">
+                  Demo assistant · Uses sample transaction data, not live account information.
+                </p>
+              </div>
+            )}
+
+            <button
+              className="floating-chat-button"
+              onClick={() => setChatWidgetOpen(!chatWidgetOpen)}
+              aria-label="Open MyPal chat"
+              title="Chat with ONE Assist"
+            >
+              {chatWidgetOpen ? <X size={24} /> : <MessageCircle size={24} />}
+              {!chatWidgetOpen && <span className="chat-button-pulse" />}
+            </button>
           </div>
-        )}
 
-        <button
-          className="floating-chat-button"
-          onClick={() => setChatWidgetOpen(!chatWidgetOpen)}
-          aria-label="Open MyPal chat"
-          title="Chat with ONE Assist"
-        >
-          {chatWidgetOpen ? <X size={24} /> : <MessageCircle size={24} />}
-          {!chatWidgetOpen && <span className="chat-button-pulse" />}
-        </button>
-      </div>
-
-      <style>{`
+          <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
 
         *{box-sizing:border-box}
@@ -2725,6 +2873,6 @@ if (!data.reply) {
           .receipt-details>div{align-items:flex-start}
         }
       `}</style>
-    </div>
-  );
+        </div>
+        );
 }
