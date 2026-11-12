@@ -65,5 +65,12 @@ A unified fintech web application featuring multiple connected modules:
 
 ## Collaborators
 
-- { GitHub Username 1 }
-- { Add more as appropriate }
+<a
+  href="https://github.com/sahithi2424"
+  target="_blank"
+  rel="noopener noreferrer"
+  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition"
+>
+  <Github size={18} />
+  GitHub Profile
+</a>
