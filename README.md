@@ -153,11 +153,11 @@ corresponding project directory.
 👥 Team
 ::: {align="center"}
   ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  Shivam Kumar                                                                                                                               Sahithi
+  Shivam                                                                                                                                     Sahithi
   ------------------------------------------------------------------------------------------------------------------------------------------ ---------------------------------------------------------------------------------------------------------------------------------------------
   Project Contributor                                                                                                                        Project Contributor
 
-  [![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=for-the-badge&logo=github)](https://github.com/YOUR_GITHUB_USERNAME)   [![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=for-the-badge&logo=github)](https://github.com/SAHITHI_GITHUB_USERNAME)
+  [![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=for-the-badge&logo=github)](https://github.com/itszshivam)   [![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=for-the-badge&logo=github)](https://github.com/SAHITHI_GITHUB_USERNAME)
   ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 :::::: {align="center"}
 ### MyPal ONE
