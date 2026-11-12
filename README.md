@@ -1,16 +1,69 @@
-# React + Vite
+<!-- Please replace anything appearing between curly brackets with your submission's value.  -->
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+# MyPal ONE 
 
-Currently, two official plugins are available:
+ MyPal ONE is an intelligent payment companion that simplifies digital payments through smart tracking, guided issue resolution, fraud awareness, and personalized financial insights — all in one place. 🚀. 
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Details
 
-## React Compiler
+## 💡 Project Highlights & Innovation
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 🎯 What Problem Does MyPal ONE Solve?
+Digital payments are convenient, but failed transactions, confusing payment statuses, suspicious requests and complicated complaint processes can leave users helpless. **MyPal ONE bridges this gap** by bringing payment tracking, intelligent assistance, fraud awareness and guided issue resolution into one unified platform.
 
-## Expanding the ESLint configuration
+### ⚡ What Makes Our Project Interesting?
+- **ONE Resolve:** Combines guided Smart Journey and Smart Alerts to help users understand what to do next.
+- **ONE Assist:** Provides conversational, transaction-aware assistance.
+- **ONE Shield:** Helps users identify potentially suspicious payment messages and requests.
+- **ONE Global:** Introduces multi-currency selection and exchange-rate conversion.
+- **ONE Access+:** Makes payment guidance more accessible.
+- **ONE Wallet:** Demonstrates integrated send and receive money experiences.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 🛠️ Interesting Libraries & Services
+- **React + TypeScript:** Interactive and structured frontend development.
+- **Vite:** Fast development and build tooling.
+- **Lucide React:** Clean, consistent interface icons.
+- **Python + FastAPI:** Backend APIs and assistant functionality.
+- **Exchange Rate API:** Currency conversion estimates for ONE Global.
+
+### 🚀 What Did We Build?
+A unified fintech web application featuring multiple connected modules:
+- Payment tracking and issue resolution.
+- AI-style conversational assistance.
+- Payment safety and awareness tools.
+- Support case management and financial insights.
+- Accessibility-focused features.
+- Simulated wallet transfers and global currency conversion.
+- 
+---
+
+**Our Vision:** Make every digital payment easier to understand, safer to manage and simpler to resolve.
+
+## Application Screenshots
+
+### Dashboard
+![MyPal ONE Dashboard](screenshots/overview.png)
+
+### ONE Track
+![ONE Track](screenshots/onetrack.png)
+
+### ONE Resolve
+![ONE Resolve](screenshots/oneresolve.png)
+
+### ONE Shield
+![ONE Shield](screenshots/oneshield.png)
+
+### ONE Insights
+![ONE Insights](screenshots/oneinsights.png)
+
+### ONE Cases
+![ONE Cases](screenshots/onecases.png)
+
+### ONE Access+
+![ONE Access+](screenshots/oneaccesss.png)
+
+
+## Collaborators
+
+- { GitHub Username 1 }
+- { Add more as appropriate }
