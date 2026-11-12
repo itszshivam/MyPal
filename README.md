@@ -41,8 +41,6 @@ A unified fintech web application featuring multiple connected modules:
 
 ## 🎥 Watch MyPal in Action
 
-## 🎥 MyPal – Project Demo
-
 <p align="center">
   <a href="YOUR_YOUTUBE_VIDEO_LINK">
     <img src="screenshots/mypal-demo.png"
