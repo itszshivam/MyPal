@@ -42,7 +42,7 @@ A unified fintech web application featuring multiple connected modules:
 ## 🎥 Watch MyPal in Action
 
 <p align="center">
-  <a href="YOUR_YOUTUBE_VIDEO_LINK">
+  <a href="https://youtu.be/crWYus0fZTk?feature=shared">
     <img src="screenshots/mypal-demo.png"
          alt="Watch MyPal Project Demo"
          width="850">
