@@ -34,7 +34,6 @@ A unified fintech web application featuring multiple connected modules:
 - Support case management and financial insights.
 - Accessibility-focused features.
 - Simulated wallet transfers and global currency conversion.
-- 
 ---
 
 **Our Vision:** Make every digital payment easier to understand, safer to manage and simpler to resolve.
