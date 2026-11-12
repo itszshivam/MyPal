@@ -57,6 +57,10 @@ A unified fintech web application featuring multiple connected modules:
 ![ONE Insights](screenshots/oneinsights.png)
 
 ### ONE Cases
+![ONE Cases](screenshots/onecases.png)
+
+### ONE Access+
+![ONE Access+](screenshots/oneaccesss.png)
 
 
 ## Collaborators
