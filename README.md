@@ -65,12 +65,9 @@ A unified fintech web application featuring multiple connected modules:
 
 ## Collaborators
 
-<a
-  href="https://github.com/sahithi2424"
-  target="_blank"
-  rel="noopener noreferrer"
-  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition"
->
-  <Github size={18} />
-  GitHub Profile
-</a>
+## 👨‍💻 Collaborators
+
+| Team Member | | GitHub Profile |
+|---|---|---|
+| Shivam | | [![GitHub](https://img.shields.io/badge/GitHub-Profile-black?logo=github)](https://github.com/itszshivam) |
+| Sahithi | | [![GitHub](https://img.shields.io/badge/GitHub-Profile-black?logo=github)](https://github.com/sahithi2424) |
