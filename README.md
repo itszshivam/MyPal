@@ -39,6 +39,20 @@ A unified fintech web application featuring multiple connected modules:
 
 **Our Vision:** Make every digital payment easier to understand, safer to manage and simpler to resolve.
 
+## 🎥 Watch MyPal in Action
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=VIDEO_ID">
+    <img src="https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg"
+         alt="MyPal Project Demo"
+         width="800">
+  </a>
+</p>
+
+<p align="center">
+  Click the thumbnail above to watch our complete project demonstration.
+</p>
+
 ## Application Screenshots
 
 ### Dashboard
