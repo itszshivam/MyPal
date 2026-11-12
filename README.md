@@ -62,9 +62,6 @@ A unified fintech web application featuring multiple connected modules:
 ### ONE Access+
 ![ONE Access+](screenshots/oneaccesss.png)
 
-
-## Collaborators
-
 ## 👨‍💻 Collaborators
 
 | Team Member | | GitHub Profile |
